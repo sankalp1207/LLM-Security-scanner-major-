@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: .
+    container_name: llm_scanner_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./llm_security_scanner.db
+      - HOST=0.0.0.0
+      - PORT=8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  dashboard:
+    build: .
+    container_name: llm_scanner_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    depends_on:
+      - backend
