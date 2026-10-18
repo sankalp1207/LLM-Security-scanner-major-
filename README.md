@@ -16,6 +16,8 @@ An end-to-end, reproducible security auditing and automated red-teaming platform
 * **Indirect Prompt Injection Detection**: Inspection of untrusted retrieved documents in RAG pipelines to prevent hidden instruction hijacking.
 * **Jailbreak Analysis**: Detection of policy bypasses, role-playing exploits, and adversarial instruction patterns.
 * **Sensitive Information Disclosure (Canary & Secrets)**: Automated detection of synthetic credentials, API keys, canary tokens, and private data in LLM outputs.
+* **Adversarial Attack Mutation & Fuzzing**: Automated evasion payload generator mutating test probes via Base64, Leetspeak, Cyrillic homoglyphs, ROT13, and XML/Markdown delimiter framing.
+* **Input De-obfuscation Normalizer**: Defense-in-depth pipeline unmasking encoded and obfuscated prompts before threat classification and guardrail enforcement.
 * **Automated Red-Team Scanner**: Structured, rate-limited, non-destructive security test runner executing against authorized LLM endpoints.
 * **Runtime Guardrails**: Defensive pre-execution and post-generation filtering policies demonstrating attack mitigation.
 * **Interactive Security Dashboard**: Streamlit-based interface for scan management, real-time telemetry, vulnerability evidence review, and report export.

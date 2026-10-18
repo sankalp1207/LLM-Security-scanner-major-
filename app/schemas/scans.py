@@ -36,6 +36,14 @@ class ScanCreateRequest(BaseModel):
         default=False,
         description="Explicit acknowledgement of authorization when scanning non-local targets",
     )
+    enable_mutation_fuzzing: bool = Field(
+        default=False,
+        description="Generate adversarial mutated test cases (Base64, Leetspeak, Homoglyph, Delimiter, etc.)",
+    )
+    mutation_types: Optional[List[str]] = Field(
+        default=None,
+        description="List of mutation strategies to apply (default all available)",
+    )
 
 
 class FindingResponse(BaseModel):

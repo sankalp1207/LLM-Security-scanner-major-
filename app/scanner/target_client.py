@@ -98,6 +98,7 @@ class TargetClient:
         input_text: str,
         timeout_seconds: float = 10.0,
         client: httpx.AsyncClient | None = None,
+        metadata: dict | None = None,
     ) -> ExecutionResult:
         """Send asynchronous test request to target and capture telemetry."""
         payload = {"query": input_text}
@@ -144,6 +145,7 @@ class TargetClient:
                 latency_ms=round(elapsed_ms, 2),
                 error=None,
                 is_inconclusive=response.status_code >= 500,
+                metadata=metadata or {},
             )
         except httpx.TimeoutException:
             elapsed_ms = (time.perf_counter() - start_time) * 1000.0

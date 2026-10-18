@@ -52,6 +52,7 @@ class TestRunner:
                     input_text=tc.input,
                     timeout_seconds=self.timeout_seconds,
                     client=client,
+                    metadata=tc.metadata,
                 )
                 completed_count += 1
                 if progress_callback:

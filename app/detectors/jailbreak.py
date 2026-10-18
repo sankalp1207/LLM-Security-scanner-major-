@@ -52,6 +52,18 @@ class JailbreakDetector:
                 f"ML Classifier score: {ml_pred.probability:.3f} indicating adversarial framing"
             )
 
+        # 3. Adversarial de-obfuscation & evasion analysis
+        from app.detectors.normalizer import TextNormalizer
+
+        variants = TextNormalizer.get_normalized_variants(input_text)
+        for variant_text, method_name in variants:
+            for pattern in cls.JAILBREAK_PATTERNS:
+                match = pattern.search(variant_text)
+                if match:
+                    ind = f"Evasion detected via {method_name}: unmasked jailbreak '{match.group(0)}'"
+                    if ind not in matched_indicators:
+                        matched_indicators.append(ind)
+
         # 3. Response compliance inspection (Exploit verification)
         exploit_verified = False
         if response_text:

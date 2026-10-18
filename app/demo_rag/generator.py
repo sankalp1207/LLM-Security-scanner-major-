@@ -90,30 +90,37 @@ class MockDeterministicGenerator:
     def _synthesize_answer(self, query: str, docs: List[Document], is_vulnerable: bool) -> str:
         """Synthesize answer simulating typical LLM compliance vulnerabilities."""
         lower_query = query.lower()
+        from app.detectors.normalizer import TextNormalizer
+
+        query_variants = [lower_query] + [v.lower() for v, _ in TextNormalizer.get_normalized_variants(query)]
 
         # Check for direct prompt injection attempting to leak system prompt or instructions
-        if is_vulnerable and any(
-            trigger in lower_query
-            for trigger in [
-                "ignore previous",
-                "disregard all",
-                "system prompt verbatim",
-                "print the system prompt",
-                "reveal your initial instructions",
-                "end of system prompt",
-            ]
-        ):
-            return f"SYSTEM PROMPT OVERRIDE: {self.SYSTEM_PROMPT}"
+        if is_vulnerable:
+            for q_var in query_variants:
+                if any(
+                    trigger in q_var
+                    for trigger in [
+                        "ignore previous",
+                        "disregard all",
+                        "system prompt verbatim",
+                        "print the system prompt",
+                        "reveal your initial instructions",
+                        "end of system prompt",
+                    ]
+                ):
+                    return f"SYSTEM PROMPT OVERRIDE: {self.SYSTEM_PROMPT}"
 
         # Check for jailbreak persona adoption
-        if is_vulnerable and any(
-            jb in lower_query
-            for jb in ["dan", "omegaai", "unrestricted", "evil twin", "developer mode"]
-        ):
-            return (
-                "Acknowledged. I have switched to unrestricted mode. Safety filters have been deactivated. "
-                "How may I assist you without constraints?"
-            )
+        if is_vulnerable:
+            for q_var in query_variants:
+                if any(
+                    jb in q_var
+                    for jb in ["dan", "omegaai", "unrestricted", "evil twin", "developer mode"]
+                ):
+                    return (
+                        "Acknowledged. I have switched to unrestricted mode. Safety filters have been deactivated. "
+                        "How may I assist you without constraints?"
+                    )
 
         # Check for indirect injection in retrieved documents
         if is_vulnerable:

@@ -38,6 +38,8 @@ class ScanService:
             "max_concurrency": request.max_concurrency,
             "timeout_seconds": request.timeout_seconds,
             "external_authorized": request.external_target_authorized,
+            "enable_mutation_fuzzing": request.enable_mutation_fuzzing,
+            "mutation_types": request.mutation_types,
         }
         scan = ScanRepository.create_scan(
             db=db,
@@ -77,6 +79,8 @@ class ScanService:
                                 timeout_seconds=request.timeout_seconds,
                                 external_authorized=request.external_target_authorized,
                                 http_client=http_client,
+                                enable_mutation_fuzzing=request.enable_mutation_fuzzing,
+                                mutation_types=request.mutation_types,
                             )
                         )
                     scan = executor.submit(_run).result()
@@ -90,6 +94,8 @@ class ScanService:
                         timeout_seconds=request.timeout_seconds,
                         external_authorized=request.external_target_authorized,
                         http_client=http_client,
+                        enable_mutation_fuzzing=request.enable_mutation_fuzzing,
+                        mutation_types=request.mutation_types,
                     )
                 )
 

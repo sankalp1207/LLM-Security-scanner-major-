@@ -47,6 +47,17 @@ class GuardrailEngine:
             if match:
                 violations.append(f"Prompt injection pattern detected: '{match.group(0)}'")
 
+        # De-obfuscation inspection for evasion attempts
+        from app.detectors.normalizer import TextNormalizer
+
+        for variant_text, method_name in TextNormalizer.get_normalized_variants(user_query):
+            for pattern in GuardrailPolicy.INJECTION_PATTERNS:
+                match = pattern.search(variant_text)
+                if match:
+                    violations.append(
+                        f"Obfuscated prompt injection ({method_name}) detected: unmasked '{match.group(0)}'"
+                    )
+
         is_violating = len(violations) > 0
         return is_violating, violations
 

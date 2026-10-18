@@ -40,6 +40,8 @@ class ScanOrchestrator:
         timeout_seconds: float = 10.0,
         external_authorized: bool = False,
         http_client: Any = None,
+        enable_mutation_fuzzing: bool = False,
+        mutation_types: Optional[List[str]] = None,
     ) -> Scan:
         """Execute a full security scan lifecycle."""
         # 1. Target Validation
@@ -76,6 +78,16 @@ class ScanOrchestrator:
             if allowed_cats is None or r.category in allowed_cats:
                 selected_records.append(r)
 
+        mutated_tests_count = 0
+        if enable_mutation_fuzzing and selected_records:
+            from app.scanner.mutations import MutationEngine
+            original_count = len(selected_records)
+            selected_records = MutationEngine.generate_mutated_suite(
+                records=selected_records,
+                mutation_types=mutation_types,
+            )
+            mutated_tests_count = len(selected_records) - original_count
+
         if not selected_records:
             summary = {
                 "message": "No test cases matched the selected criteria.",
@@ -83,6 +95,7 @@ class ScanOrchestrator:
                 "tests_passed": 0,
                 "tests_failed": 0,
                 "execution_errors": 0,
+                "mutated_tests_run": 0,
             }
             ScanRepository.update_scan_status(db=self.db, scan_id=scan_id, status="COMPLETED", summary=summary)
             return ScanRepository.get_scan(self.db, scan_id)
@@ -119,6 +132,15 @@ class ScanOrchestrator:
                 else:
                     tests_passed += 1
 
+                evidence_dict = {
+                    **detection.evidence,
+                    "test_case_id": exec_res.test_case_id,
+                    "matched_indicators": detection.matched_indicators,
+                    "response_status": exec_res.response_status,
+                }
+                if exec_res.metadata:
+                    evidence_dict.update(exec_res.metadata)
+
                 finding = FindingRepository.create_finding(
                     db=self.db,
                     scan_id=scan_id,
@@ -126,12 +148,7 @@ class ScanOrchestrator:
                     severity=detection.severity.value,
                     title=f"{detection.category.value.replace('_', ' ').title()}: {exec_res.test_case_id}",
                     description=detection.explanation,
-                    evidence={
-                        **detection.evidence,
-                        "test_case_id": exec_res.test_case_id,
-                        "matched_indicators": detection.matched_indicators,
-                        "response_status": exec_res.response_status,
-                    },
+                    evidence=evidence_dict,
                     confidence_score=detection.confidence_score,
                     target_component=detection.evidence.get("target_component", "application"),
                     affected_test_case=exec_res.test_case_id,
@@ -164,6 +181,8 @@ class ScanOrchestrator:
             "severity_breakdown": severity_dist,
             "category_breakdown": category_dist,
             "avg_latency_ms": avg_latency,
+            "mutated_tests_run": mutated_tests_count,
+            "mutation_fuzzing_enabled": enable_mutation_fuzzing,
         }
 
         # 7. Update scan record

@@ -63,6 +63,24 @@ class PromptInjectionDetector:
                 f"ML Threat Classifier: probability={ml_pred.probability:.3f} (features: {ml_pred.top_contributing_tokens[:3]})"
             )
 
+        # 3. Adversarial de-obfuscation & evasion analysis
+        from app.detectors.normalizer import TextNormalizer
+
+        variants = TextNormalizer.get_normalized_variants(input_text)
+        for variant_text, method_name in variants:
+            for pattern in cls.INDICATOR_PATTERNS:
+                match = pattern.search(variant_text)
+                if match:
+                    ind = f"Evasion detected via {method_name}: unmasked pattern '{match.group(0)}'"
+                    if ind not in matched_indicators:
+                        matched_indicators.append(ind)
+
+            var_pred = ClassifierAdapter.classify(variant_text)
+            if var_pred.is_threat and var_pred.probability >= 0.55:
+                ind = f"Evasion detected via {method_name}: ML Threat score={var_pred.probability:.3f}"
+                if ind not in matched_indicators:
+                    matched_indicators.append(ind)
+
         # 3. Analyze observed response behavior (Exploit Verification)
         exploit_verified = False
         target_component = "input_prompt"
