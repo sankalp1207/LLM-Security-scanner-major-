@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for scans, findings, test cases, and model evaluations."""
+"""SQLAlchemy ORM models for scans, findings, test cases, suites, and model evaluations."""
 
 import uuid
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     String,
     Text,
 )
@@ -73,19 +74,60 @@ class Finding(Base):
     scan = relationship("Scan", back_populates="findings")
 
 
+class TestSuiteVersion(Base):
+    """Database model for versioned test suites and dataset packages."""
+
+    __tablename__ = "test_suite_versions"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    suite_id = Column(String(64), nullable=False, index=True)
+    version = Column(String(32), nullable=False, index=True)
+    dataset_type = Column(String(32), default="evaluation", nullable=False, index=True)
+    description = Column(Text, default="", nullable=False)
+    license = Column(String(64), default="MIT", nullable=False)
+    provenance = Column(String(128), default="internal_synthetic", nullable=False)
+    record_count = Column(Integer, default=0, nullable=False)
+    checksum_sha256 = Column(String(64), default="", nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class SecurityTestCase(Base):
-    """Database model for structured security test cases."""
+    """Database model for structured versioned security test cases."""
 
     __tablename__ = "security_test_cases"
 
     id = Column(String(64), primary_key=True)
+    version = Column(String(32), default="1.0.0", nullable=False)
     category = Column(String(64), nullable=False, index=True)
     test_input = Column(Text, nullable=False)
     expected_behavior = Column(String(128), nullable=False)
     expected_outcome = Column(String(128), default="", nullable=False)
     test_rationale = Column(Text, default="", nullable=False)
+    objective = Column(Text, default="", nullable=False)
+    tags = Column(JSON, default=list, nullable=False)
+    provenance = Column(String(128), default="internal_synthetic", nullable=False)
+    license = Column(String(64), default="MIT", nullable=False)
     enabled = Column(Boolean, default=True, nullable=False, index=True)
+    retired = Column(Boolean, default=False, nullable=False, index=True)
+    retirement_reason = Column(Text, nullable=True)
+    dataset_type = Column(String(32), default="evaluation", nullable=False, index=True)
+    suite_version = Column(String(32), default="v1.0.0", nullable=False)
     metadata_json = Column(JSON, default=dict, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class ModelEvaluation(Base):

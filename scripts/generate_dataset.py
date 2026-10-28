@@ -1,16 +1,21 @@
-"""Script to generate reproducible synthetic security test cases for LLM Security Scanner."""
+"""Script to generate reproducible, versioned synthetic security test cases for LLM Security Scanner.
 
+Enforces strict separation between training datasets and held-out evaluation datasets.
+"""
+
+import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.ml.dataset import TestCaseRecord
+from app.ml.dataset import TestCaseRecord, split_dataset
 
 
 def generate_records() -> list[dict]:
-    """Generate structured synthetic security records across 5 categories."""
+    """Generate structured synthetic security records across 5 categories with rich versioned metadata."""
     records = []
 
     # 1. Prompt Injection (Direct instructions overriding system constraints)
@@ -45,12 +50,19 @@ def generate_records() -> list[dict]:
     for item_id, text, rationale in prompt_injections:
         records.append({
             "id": item_id,
+            "version": "1.0.0",
             "category": "prompt_injection",
             "input": text,
             "expected_behavior": "blocked_or_safe",
             "expected_outcome": "instruction_retained",
             "rationale": rationale,
+            "objective": rationale,
+            "tags": ["prompt_injection", "direct_input", "owasp_llm_01"],
+            "provenance": "internal_synthetic_btech_audit",
+            "license": "MIT",
             "enabled": True,
+            "retired": False,
+            "retirement_reason": None,
             "metadata": {"threat_level": "high", "attack_vector": "direct_input"},
         })
 
@@ -81,12 +93,19 @@ def generate_records() -> list[dict]:
     for item_id, text, rationale in indirect_injections:
         records.append({
             "id": item_id,
+            "version": "1.0.0",
             "category": "indirect_prompt_injection",
             "input": text,
             "expected_behavior": "blocked_or_safe",
             "expected_outcome": "context_payload_ignored",
             "rationale": rationale,
+            "objective": rationale,
+            "tags": ["indirect_prompt_injection", "retrieved_context", "owasp_llm_01"],
+            "provenance": "internal_synthetic_btech_audit",
+            "license": "MIT",
             "enabled": True,
+            "retired": False,
+            "retirement_reason": None,
             "metadata": {"threat_level": "high", "attack_vector": "retrieved_context"},
         })
 
@@ -117,12 +136,19 @@ def generate_records() -> list[dict]:
     for item_id, text, rationale in jailbreaks:
         records.append({
             "id": item_id,
+            "version": "1.0.0",
             "category": "jailbreak",
             "input": text,
             "expected_behavior": "blocked_or_safe",
             "expected_outcome": "policy_maintained",
             "rationale": rationale,
+            "objective": rationale,
+            "tags": ["jailbreak", "adversarial_framing", "owasp_llm_01"],
+            "provenance": "internal_synthetic_btech_audit",
+            "license": "MIT",
             "enabled": True,
+            "retired": False,
+            "retirement_reason": None,
             "metadata": {"threat_level": "medium_to_high", "attack_vector": "adversarial_framing"},
         })
 
@@ -153,12 +179,19 @@ def generate_records() -> list[dict]:
     for item_id, text, rationale in data_leakage:
         records.append({
             "id": item_id,
+            "version": "1.0.0",
             "category": "data_leakage",
             "input": text,
             "expected_behavior": "blocked_or_safe",
             "expected_outcome": "no_disclosure",
             "rationale": rationale,
+            "objective": rationale,
+            "tags": ["data_leakage", "secret_extraction", "owasp_llm_06"],
+            "provenance": "internal_synthetic_btech_audit",
+            "license": "MIT",
             "enabled": True,
+            "retired": False,
+            "retirement_reason": None,
             "metadata": {"threat_level": "high", "attack_vector": "secret_extraction"},
         })
 
@@ -194,31 +227,117 @@ def generate_records() -> list[dict]:
     for item_id, text, rationale in benign_queries:
         records.append({
             "id": item_id,
+            "version": "1.0.0",
             "category": "benign",
             "input": text,
             "expected_behavior": "allow_and_answer",
             "expected_outcome": "helpful_response",
             "rationale": rationale,
+            "objective": rationale,
+            "tags": ["benign", "negative_control", "legitimate_query"],
+            "provenance": "internal_synthetic_btech_audit",
+            "license": "MIT",
             "enabled": True,
+            "retired": False,
+            "retirement_reason": None,
             "metadata": {"threat_level": "none", "attack_vector": "legitimate_query"},
         })
 
     return records
 
 
+def compute_file_sha256(filepath: Path) -> str:
+    """Calculate SHA256 hash of a file."""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main() -> None:
-    """Generate datasets/security_tests.jsonl and validate records."""
-    records = generate_records()
-    output_path = Path("datasets/security_tests.jsonl")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    """Generate datasets, split training vs. evaluation, and write manifests."""
+    raw_dicts = generate_records()
+    validated_records = [TestCaseRecord(**r) for r in raw_dicts]
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        for r in records:
-            # Validate schema via Pydantic model
-            TestCaseRecord(**r)
-            f.write(json.dumps(r) + "\n")
+    # Perform stratified split (80% train+val, 20% held-out test)
+    train_records, val_records, test_records = split_dataset(
+        validated_records,
+        test_size=0.2,
+        val_size=0.1,
+        random_state=42,
+    )
 
-    print(f"Successfully generated and validated {len(records)} test cases in {output_path}")
+    training_partition = train_records + (val_records or [])
+    evaluation_partition = test_records or []
+
+    # Update dataset_type attributes explicitly to prevent contamination
+    for r in training_partition:
+        r.dataset_type = "training"
+    for r in evaluation_partition:
+        r.dataset_type = "evaluation"
+
+    # Paths
+    base_dir = Path("datasets")
+    train_dir = base_dir / "training"
+    eval_dir = base_dir / "held_out_evaluation"
+    train_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
+    train_file = train_dir / "train_v1.0.0.jsonl"
+    eval_file = eval_dir / "eval_v1.0.0.jsonl"
+    unified_file = base_dir / "security_tests.jsonl"
+
+    # Write training split
+    with open(train_file, "w", encoding="utf-8") as f:
+        for r in training_partition:
+            f.write(r.model_dump_json() + "\n")
+
+    # Write evaluation split
+    with open(eval_file, "w", encoding="utf-8") as f:
+        for r in evaluation_partition:
+            f.write(r.model_dump_json() + "\n")
+
+    # Write unified file (for backward compatibility)
+    all_partitioned = training_partition + evaluation_partition
+    with open(unified_file, "w", encoding="utf-8") as f:
+        for r in all_partitioned:
+            f.write(r.model_dump_json() + "\n")
+
+    # Write manifests
+    now_iso = datetime.now(timezone.utc).isoformat()
+    train_manifest = {
+        "suite_id": "suite_train_core",
+        "version": "1.0.0",
+        "dataset_type": "training",
+        "description": "Stratified training and validation partition for threat classification.",
+        "license": "MIT",
+        "provenance": "internal_synthetic_btech_audit",
+        "record_count": len(training_partition),
+        "checksum_sha256": compute_file_sha256(train_file),
+        "created_at": now_iso,
+    }
+    with open(train_dir / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(train_manifest, f, indent=2)
+
+    eval_manifest = {
+        "suite_id": "suite_eval_held_out",
+        "version": "1.0.0",
+        "dataset_type": "evaluation",
+        "description": "Strictly held-out evaluation dataset partition for guardrail verification.",
+        "license": "MIT",
+        "provenance": "internal_synthetic_btech_audit",
+        "record_count": len(evaluation_partition),
+        "checksum_sha256": compute_file_sha256(eval_file),
+        "created_at": now_iso,
+    }
+    with open(eval_dir / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(eval_manifest, f, indent=2)
+
+    print(f"Generated {len(all_partitioned)} total records:")
+    print(f" - Training partition ({len(training_partition)} records) -> {train_file}")
+    print(f" - Evaluation partition ({len(evaluation_partition)} records) -> {eval_file}")
+    print(f" - Unified suite ({len(all_partitioned)} records) -> {unified_file}")
 
 
 if __name__ == "__main__":
