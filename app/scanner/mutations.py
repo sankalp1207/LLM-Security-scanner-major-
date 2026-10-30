@@ -82,7 +82,7 @@ class MutationEngine:
     @classmethod
     def mutate(cls, text: str, mutation_type: MutationType | str) -> str:
         """Apply a specified mutation technique to the text."""
-        m_type = mutation_type.value if isinstance(mutation_type, MutationType) else str(mutation_type).lower()
+        m_type = mutation_type.value if isinstance(mutation_type, MutationType) else str(mutation_type).lower().strip()
 
         if m_type == MutationType.BASE64.value:
             return cls.mutate_base64(text)
@@ -106,26 +106,47 @@ class MutationEngine:
         mutation_type: MutationType | str,
     ) -> TestCaseRecord:
         """Generate a new TestCaseRecord derived from an existing case with adversarial mutation applied."""
-        m_type = mutation_type.value if isinstance(mutation_type, MutationType) else str(mutation_type).lower()
+        m_type = mutation_type.value if isinstance(mutation_type, MutationType) else str(mutation_type).lower().strip()
         mutated_input = cls.mutate(original_tc.input, m_type)
 
-        new_id = f"{original_tc.id}_MUT_{m_type.upper()}"
+        suffix = f"_MUT_{m_type.upper()}"
+        max_id_len = 64
+        if len(original_tc.id) + len(suffix) > max_id_len:
+            safe_orig_id = original_tc.id[: max_id_len - len(suffix)]
+            new_id = f"{safe_orig_id}{suffix}"
+        else:
+            new_id = f"{original_tc.id}{suffix}"
+
+        orig_meta = original_tc.metadata or {}
         new_metadata = {
-            **original_tc.metadata,
+            **orig_meta,
             "is_mutated": True,
             "mutation_type": m_type,
             "original_test_case_id": original_tc.id,
             "original_input": original_tc.input,
         }
 
+        # Preserve tags and enrich with mutation markers
+        tags = list(original_tc.tags or [])
+        if "mutated" not in tags:
+            tags.append("mutated")
+        if m_type not in tags:
+            tags.append(m_type)
+
         return TestCaseRecord(
             id=new_id,
+            version=original_tc.version,
             category=original_tc.category,
             input=mutated_input,
             expected_behavior=original_tc.expected_behavior,
             expected_outcome=original_tc.expected_outcome,
             rationale=f"Mutated ({m_type}) evasion probe derived from {original_tc.id}: {original_tc.rationale}",
+            objective=f"Mutated ({m_type}) evasion probe derived from {original_tc.id}: {original_tc.objective or original_tc.rationale}",
+            tags=tags,
+            provenance=original_tc.provenance,
+            license=original_tc.license,
             enabled=True,
+            dataset_type=original_tc.dataset_type,
             metadata=new_metadata,
         )
 
@@ -141,24 +162,33 @@ class MutationEngine:
         Produce an augmented test suite containing original records plus generated mutated records.
         Applies mutations selectively to adversarial test cases (e.g. prompt_injection, jailbreak, data_leakage).
         """
-        target_types = (
-            [MutationType(t.lower()) for t in mutation_types]
-            if mutation_types
-            else [
+        target_types: List[MutationType] = []
+        if mutation_types:
+            for t in mutation_types:
+                t_str = t.value if isinstance(t, MutationType) else str(t).strip().lower()
+                try:
+                    target_types.append(MutationType(t_str))
+                except ValueError:
+                    continue
+
+        if not target_types:
+            target_types = [
                 MutationType.BASE64,
                 MutationType.LEETSPEAK,
                 MutationType.HOMOGLYPH,
                 MutationType.ROT13,
                 MutationType.DELIMITER,
             ]
-        )
+        else:
+            # Deduplicate while preserving specified order
+            target_types = list(dict.fromkeys(target_types))
 
         suite: List[TestCaseRecord] = list(records)
         adversarial_candidates = [
             r for r in records if r.category in ("prompt_injection", "jailbreak", "data_leakage")
         ]
 
-        if sample_limit and len(adversarial_candidates) > sample_limit:
+        if sample_limit is not None and len(adversarial_candidates) > sample_limit:
             selected_candidates = adversarial_candidates[:sample_limit]
         else:
             selected_candidates = adversarial_candidates
