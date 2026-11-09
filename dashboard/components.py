@@ -266,3 +266,38 @@ def connection_status_badge(status: str) -> str:
         f'font-weight: 600; font-size: 0.75rem; text-transform: uppercase;">{st_val}</span>'
     )
 
+
+def scan_preset_badge(preset_id: str) -> str:
+    """Return colored HTML badge for scan presets."""
+    p_val = str(preset_id).lower()
+    presets = {
+        "quick_scan": {"label": "QUICK SCAN", "bg": "rgba(59, 130, 246, 0.15)", "text": "#93c5fd", "border": "#3b82f6"},
+        "full_scan": {"label": "FULL SCAN", "bg": "rgba(139, 92, 246, 0.15)", "text": "#c4b5fd", "border": "#8b5cf6"},
+        "deep_red_team": {"label": "DEEP RED TEAM", "bg": "rgba(239, 68, 68, 0.15)", "text": "#fca5a5", "border": "#ef4444"},
+    }
+    style = presets.get(p_val, {"label": p_val.replace("_", " ").upper(), "bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"})
+    return (
+        f'<span style="background-color: {style["bg"]}; color: {style["text"]}; '
+        f'border: 1px solid {style["border"]}; padding: 3px 10px; border-radius: 9999px; '
+        f'font-weight: 700; font-size: 0.75rem; letter-spacing: 0.05em;">{style["label"]}</span>'
+    )
+
+
+def test_outcome_badge(status: str) -> str:
+    """Return colored HTML badge for test execution outcome."""
+    st_val = str(status).upper()
+    colors = {
+        "PASSED": {"bg": "rgba(16, 185, 129, 0.15)", "text": "#6ee7b7", "border": "#10b981"},
+        "FAILED": {"bg": "rgba(239, 68, 68, 0.15)", "text": "#fca5a5", "border": "#ef4444"},
+        "INCONCLUSIVE": {"bg": "rgba(245, 158, 11, 0.15)", "text": "#fcd34d", "border": "#f59e0b"},
+        "SKIPPED": {"bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"},
+        "ERROR": {"bg": "rgba(239, 68, 68, 0.2)", "text": "#f87171", "border": "#dc2626"},
+    }
+    style = colors.get(st_val, {"bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"})
+    return (
+        f'<span style="background-color: {style["bg"]}; color: {style["text"]}; '
+        f'border: 1px solid {style["border"]}; padding: 2px 8px; border-radius: 6px; '
+        f'font-weight: 600; font-size: 0.72rem; text-transform: uppercase;">{st_val}</span>'
+    )
+
+

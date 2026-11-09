@@ -13,6 +13,7 @@ from app.database.models import (
     Scan,
     SecurityTestCase,
     TargetConfiguration,
+    TestExecution,
     TestSuiteVersion,
     UserOnboarding,
 )
@@ -28,16 +29,35 @@ class ScanRepository:
         configuration: dict,
         scanner_version: str = "1.0.0",
         scan_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        user_id: str = "default_user",
+        preset: str = "quick_scan",
+        target_configuration_id: Optional[str] = None,
+        configuration_snapshot: Optional[dict] = None,
+        status: str = "PENDING",
+        total_tests: int = 0,
     ) -> Scan:
         """Create and persist a new Scan record."""
         scan = Scan(
             id=scan_id or None,
+            project_id=project_id,
+            user_id=user_id,
+            preset=preset,
             target_identifier=target_identifier,
-            status="PENDING",
+            target_configuration_id=target_configuration_id,
+            status=status,
             configuration=configuration,
+            configuration_snapshot=configuration_snapshot or configuration,
             start_timestamp=datetime.now(timezone.utc),
             summary={},
             scanner_version=scanner_version,
+            total_tests=total_tests,
+            completed_tests=0,
+            passed_tests=0,
+            failed_tests=0,
+            inconclusive_tests=0,
+            skipped_tests=0,
+            execution_errors=0,
         )
         db.add(scan)
         db.commit()
@@ -61,9 +81,31 @@ class ScanRepository:
         )
 
     @staticmethod
+    def list_scans_by_project(
+        db: Session,
+        project_id: str,
+        skip: int = 0,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> List[Scan]:
+        """Retrieve paginated scans for a project."""
+        q = db.query(Scan).filter(Scan.project_id == project_id)
+        if status:
+            q = q.filter(Scan.status == status.upper())
+        return q.order_by(Scan.start_timestamp.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
     def count_scans(db: Session) -> int:
         """Return total count of scan records."""
         return db.query(func.count(Scan.id)).scalar() or 0
+
+    @staticmethod
+    def count_scans_by_project(db: Session, project_id: str, status: Optional[str] = None) -> int:
+        """Count scans for a project."""
+        q = db.query(func.count(Scan.id)).filter(Scan.project_id == project_id)
+        if status:
+            q = q.filter(Scan.status == status.upper())
+        return q.scalar() or 0
 
     @staticmethod
     def update_scan_status(
@@ -71,16 +113,59 @@ class ScanRepository:
         scan_id: str,
         status: str,
         summary: Optional[dict] = None,
+        completed_at: Optional[datetime] = None,
+        total_tests: Optional[int] = None,
+        completed_tests: Optional[int] = None,
+        passed_tests: Optional[int] = None,
+        failed_tests: Optional[int] = None,
+        inconclusive_tests: Optional[int] = None,
+        skipped_tests: Optional[int] = None,
+        execution_errors: Optional[int] = None,
+        cancellation_reason: Optional[str] = None,
+        failure_reason: Optional[str] = None,
     ) -> Optional[Scan]:
-        """Update the status and summary of an existing scan."""
+        """Update status, lifecycle timestamps, and test execution metrics of a scan."""
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         if not scan:
             return None
         scan.status = status
         if summary is not None:
             scan.summary = summary
+        if total_tests is not None:
+            scan.total_tests = total_tests
+        if completed_tests is not None:
+            scan.completed_tests = completed_tests
+        if passed_tests is not None:
+            scan.passed_tests = passed_tests
+        if failed_tests is not None:
+            scan.failed_tests = failed_tests
+        if inconclusive_tests is not None:
+            scan.inconclusive_tests = inconclusive_tests
+        if skipped_tests is not None:
+            scan.skipped_tests = skipped_tests
+        if execution_errors is not None:
+            scan.execution_errors = execution_errors
+        if cancellation_reason is not None:
+            scan.cancellation_reason = cancellation_reason
+        if failure_reason is not None:
+            scan.failure_reason = failure_reason
         if status in ("COMPLETED", "FAILED", "CANCELLED", "PARTIALLY_COMPLETED"):
-            scan.completion_timestamp = datetime.now(timezone.utc)
+            scan.completion_timestamp = completed_at or datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(scan)
+        return scan
+
+    @staticmethod
+    def cancel_scan(db: Session, scan_id: str, reason: str = "Cancelled by user") -> Optional[Scan]:
+        """Request cancellation of an active scan."""
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if not scan:
+            return None
+        if scan.status in ("COMPLETED", "FAILED", "CANCELLED"):
+            return scan  # Already in terminal state
+        scan.status = "CANCELLED"
+        scan.cancellation_reason = reason
+        scan.completion_timestamp = datetime.now(timezone.utc)
         db.commit()
         db.refresh(scan)
         return scan
@@ -94,6 +179,84 @@ class ScanRepository:
         db.delete(scan)
         db.commit()
         return True
+
+
+class TestExecutionRepository:
+    """Repository managing TestExecution telemetry persistence."""
+
+    @staticmethod
+    def create_execution(
+        db: Session,
+        scan_id: str,
+        test_case_id: str,
+        category: str,
+        input_fixture: str,
+        expected_behavior: str,
+        observed_behavior: str,
+        execution_status: str,
+        latency_ms: float = 0.0,
+        response_status: Optional[int] = None,
+        detection_result: Optional[dict] = None,
+        evidence: Optional[dict] = None,
+        test_version: str = "1.0.0",
+        error_message: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> TestExecution:
+        """Create and persist a test execution record."""
+        record = TestExecution(
+            scan_id=scan_id,
+            test_case_id=test_case_id,
+            category=category,
+            test_version=test_version,
+            input_fixture=input_fixture,
+            expected_behavior=expected_behavior,
+            observed_behavior=observed_behavior,
+            execution_status=execution_status,
+            latency_ms=round(latency_ms, 2),
+            response_status=response_status,
+            detection_result=detection_result or {},
+            evidence=evidence or {},
+            error_message=error_message,
+            started_at=started_at or datetime.now(timezone.utc),
+            completed_at=completed_at or datetime.now(timezone.utc),
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
+    def list_executions_by_scan(
+        db: Session,
+        scan_id: str,
+        status: Optional[str] = None,
+        category: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[TestExecution]:
+        """Fetch paginated test execution records for a scan."""
+        q = db.query(TestExecution).filter(TestExecution.scan_id == scan_id)
+        if status:
+            q = q.filter(TestExecution.execution_status == status.upper())
+        if category:
+            q = q.filter(TestExecution.category == category.lower())
+        return q.order_by(TestExecution.started_at.asc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def count_executions_by_scan(
+        db: Session,
+        scan_id: str,
+        status: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> int:
+        """Count test executions for a scan."""
+        q = db.query(func.count(TestExecution.id)).filter(TestExecution.scan_id == scan_id)
+        if status:
+            q = q.filter(TestExecution.execution_status == status.upper())
+        if category:
+            q = q.filter(TestExecution.category == category.lower())
+        return q.scalar() or 0
 
 
 class FindingRepository:

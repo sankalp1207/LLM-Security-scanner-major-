@@ -321,3 +321,95 @@ class ScannerAPIClient:
         except Exception as e:
             return {"error": str(e)}
 
+    # -------------------------------------------------------------------------
+    # PHASE 3: ONE-CLICK SCANNING, PRESETS & TELEMETRY
+    # -------------------------------------------------------------------------
+    def get_scan_presets(self) -> List[Dict[str, Any]]:
+        """Retrieve canonical server-side scan presets."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/scan/presets")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return []
+
+    def get_project_scan_capabilities(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Resolve target capabilities and compatible test categories."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/projects/{project_id}/scan-capabilities")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return None
+
+    def create_project_scan(self, project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Initiate one-click security scan scoped to an enterprise project."""
+        try:
+            # Allow longer timeout for scan creation/execution
+            with httpx.Client(timeout=120.0) as client:
+                res = client.post(f"{self.api_v1}/projects/{project_id}/scans", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                detail = res.json().get("detail", res.text) if res.headers.get("content-type") == "application/json" else res.text
+                return {"error": detail}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def list_project_scans(
+        self,
+        project_id: str,
+        skip: int = 0,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fetch paginated scan records for a project."""
+        try:
+            params = f"skip={skip}&limit={limit}"
+            if status:
+                params += f"&status={status}"
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/projects/{project_id}/scans?{params}")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return {"total": 0, "items": []}
+
+    def get_scan_tests(
+        self,
+        scan_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Retrieve individual test execution telemetry for a scan."""
+        try:
+            params = f"skip={skip}&limit={limit}"
+            if status:
+                params += f"&status={status}"
+            if category:
+                params += f"&category={category}"
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{self.api_v1}/scans/{scan_id}/tests?{params}")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return {"total": 0, "items": []}
+
+    def cancel_scan(self, scan_id: str, reason: str = "Cancelled by user") -> Dict[str, Any]:
+        """Request cancellation of an active or queued scan."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.post(f"{self.api_v1}/scans/{scan_id}/cancel", json={"reason": reason})
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+

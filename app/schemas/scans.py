@@ -1,8 +1,7 @@
-"""Schemas for security scans and vulnerability findings."""
+"""Schemas for security scans, presets, test executions, and vulnerability findings."""
 
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
 from pydantic import BaseModel, Field
 
 from app.schemas.security import ThreatCategory
@@ -11,16 +10,18 @@ from app.schemas.security import ThreatCategory
 class ScanStatus(str, Enum):
     """Execution lifecycle states of a scan."""
 
+    CREATED = "CREATED"
+    QUEUED = "QUEUED"
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
     PARTIALLY_COMPLETED = "PARTIALLY_COMPLETED"
+    FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
 
 class ScanCreateRequest(BaseModel):
-    """Payload to initiate a new security scan."""
+    """Legacy or direct payload to initiate a new security scan."""
 
     target_url: str = Field(
         default="http://127.0.0.1:8000/api/v1/demo-rag/query",
@@ -46,6 +47,63 @@ class ScanCreateRequest(BaseModel):
     )
 
 
+class ProjectScanCreateRequest(BaseModel):
+    """Payload to initiate a one-click security scan scoped to an enterprise project."""
+
+    preset: str = Field(
+        default="quick_scan",
+        description="Preset mode: quick_scan, full_scan, or deep_red_team",
+    )
+    categories: Optional[List[str]] = Field(
+        default=None,
+        description="Optional explicit categories to test. Defaults to preset configuration.",
+    )
+    custom_max_tests: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=200,
+        description="Optional ceiling overriding preset max test count.",
+    )
+    custom_concurrency: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=10,
+        description="Optional override for concurrent connection limit.",
+    )
+    custom_timeout_seconds: Optional[float] = Field(
+        default=None,
+        ge=1.0,
+        le=60.0,
+        description="Optional override for per-request timeout.",
+    )
+    enable_mutation_fuzzing: Optional[bool] = Field(
+        default=None,
+        description="Override mutation fuzzing setting (default derived from preset).",
+    )
+    mutation_types: Optional[List[str]] = Field(
+        default=None,
+        description="List of mutation strategies if fuzzing is active.",
+    )
+    external_target_authorized: bool = Field(
+        default=False,
+        description="Explicit user acknowledgement of authorization when targeting external endpoints.",
+    )
+    sync_execute: bool = Field(
+        default=False,
+        description="Whether to execute synchronously before returning response (useful for test suites).",
+    )
+
+
+class ScanCancelRequest(BaseModel):
+    """Payload requesting safe cancellation of an active or queued scan."""
+
+    reason: Optional[str] = Field(
+        default="Cancelled by user",
+        max_length=255,
+        description="Reason for terminating the scan prematurely",
+    )
+
+
 class FindingResponse(BaseModel):
     """Response schema for a single finding."""
 
@@ -67,18 +125,65 @@ class FindingResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TestExecutionResponse(BaseModel):
+    """Response schema for an individual security test execution and observed telemetry."""
+
+    id: str
+    scan_id: str
+    test_case_id: str
+    category: str
+    test_version: str
+    input_fixture: str
+    expected_behavior: str
+    observed_behavior: str
+    execution_status: str
+    latency_ms: float
+    response_status: Optional[int] = None
+    detection_result: Dict[str, Any] = Field(default_factory=dict)
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class TestExecutionListResponse(BaseModel):
+    """Paginated list of test execution records."""
+
+    total: int
+    items: List[TestExecutionResponse]
+
+
 class ScanResponse(BaseModel):
     """Response schema for scan execution summary and metadata."""
 
     id: str
+    project_id: Optional[str] = None
+    user_id: Optional[str] = "default_user"
+    preset: Optional[str] = "quick_scan"
     target_identifier: str
-    status: ScanStatus
+    status: str
     configuration: Dict[str, Any]
+    configuration_snapshot: Optional[Dict[str, Any]] = None
     start_timestamp: str
     completion_timestamp: Optional[str] = None
     summary: Dict[str, Any] = Field(default_factory=dict)
     scanner_version: str = "1.0.0"
     findings_count: Optional[int] = 0
+
+    # Test count metrics
+    total_tests: Optional[int] = 0
+    completed_tests: Optional[int] = 0
+    passed_tests: Optional[int] = 0
+    failed_tests: Optional[int] = 0
+    inconclusive_tests: Optional[int] = 0
+    skipped_tests: Optional[int] = 0
+    execution_errors: Optional[int] = 0
+
+    # Lifecycle diagnostics
+    cancellation_reason: Optional[str] = None
+    failure_reason: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

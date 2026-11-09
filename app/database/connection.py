@@ -64,11 +64,29 @@ def init_db() -> None:
                         if col_name not in cols:
                             conn.exec_driver_sql(f"ALTER TABLE security_test_cases ADD COLUMN {col_name} {col_type}")
 
-                # Ensure project_id on scans table
+                # Ensure Phase 2 and Phase 3 columns on scans table
                 scan_res = conn.exec_driver_sql("PRAGMA table_info(scans)")
                 scan_cols = {row[1] for row in scan_res.fetchall()}
-                if scan_cols and "project_id" not in scan_cols:
-                    conn.exec_driver_sql("ALTER TABLE scans ADD COLUMN project_id VARCHAR(64)")
+                if scan_cols:
+                    scan_new_cols = {
+                        "project_id": "VARCHAR(64)",
+                        "user_id": "VARCHAR(64) DEFAULT 'default_user'",
+                        "preset": "VARCHAR(32) DEFAULT 'quick_scan'",
+                        "target_configuration_id": "VARCHAR(64)",
+                        "configuration_snapshot": "JSON DEFAULT '{}'",
+                        "total_tests": "INTEGER DEFAULT 0",
+                        "completed_tests": "INTEGER DEFAULT 0",
+                        "passed_tests": "INTEGER DEFAULT 0",
+                        "failed_tests": "INTEGER DEFAULT 0",
+                        "inconclusive_tests": "INTEGER DEFAULT 0",
+                        "skipped_tests": "INTEGER DEFAULT 0",
+                        "execution_errors": "INTEGER DEFAULT 0",
+                        "cancellation_reason": "TEXT",
+                        "failure_reason": "TEXT",
+                    }
+                    for col_name, col_type in scan_new_cols.items():
+                        if col_name not in scan_cols:
+                            conn.exec_driver_sql(f"ALTER TABLE scans ADD COLUMN {col_name} {col_type}")
 
                 conn.commit()
             except Exception:

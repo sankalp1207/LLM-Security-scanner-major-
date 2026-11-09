@@ -1,10 +1,11 @@
 """FastAPI routes for Project management, target configuration, connection testing, and onboarding."""
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.database.repository import ProjectRepository
 from app.schemas.projects import (
     ConnectionVerificationRequest,
     ConnectionVerificationResponse,
@@ -15,7 +16,14 @@ from app.schemas.projects import (
     ProjectResponse,
     ProjectUpdateRequest,
 )
+from app.schemas.scans import (
+    ProjectScanCreateRequest,
+    ScanListResponse,
+    ScanResponse,
+)
+from app.services.capability_service import CapabilityService, TargetCapabilityReport
 from app.services.project_service import ProjectService
+from app.services.scan_service import ScanService
 
 router = APIRouter(tags=["Projects & Onboarding"])
 
@@ -163,4 +171,106 @@ def update_project_preferences(
     return ProjectService.update_preferences(
         db=db, project_id=project_id, preferences=preferences, owner_id=user_id
     )
+
+
+# -----------------------------------------------------------------------------
+# PROJECT SCANNING & CAPABILITY RESOLUTION (PHASE 3)
+# -----------------------------------------------------------------------------
+@router.get(
+    "/projects/{project_id}/scan-capabilities",
+    response_model=TargetCapabilityReport,
+)
+def get_project_scan_capabilities(
+    project_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> TargetCapabilityReport:
+    """Evaluate target capabilities and resolve supported/skipped threat categories."""
+    project = ProjectRepository.get_project(db, project_id=project_id, owner_id=user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
+    return CapabilityService.resolve_project_capabilities(project)
+
+
+@router.post("/projects/{project_id}/scans", response_model=ScanResponse)
+def create_project_scan(
+    project_id: str,
+    request: ProjectScanCreateRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ScanResponse:
+    """Initiate a one-click security scan scoped to an enterprise project."""
+    scan = ScanService.create_and_run_project_scan(
+        db=db, project_id=project_id, request=request, user_id=user_id
+    )
+    findings = ScanService.get_findings_for_scan(db=db, scan_id=scan.id, user_id=user_id)
+    return ScanResponse(
+        id=scan.id,
+        project_id=scan.project_id,
+        user_id=scan.user_id,
+        preset=scan.preset,
+        target_identifier=scan.target_identifier,
+        status=scan.status,
+        configuration=scan.configuration,
+        configuration_snapshot=scan.configuration_snapshot,
+        start_timestamp=scan.start_timestamp.isoformat(),
+        completion_timestamp=scan.completion_timestamp.isoformat() if scan.completion_timestamp else None,
+        summary=scan.summary,
+        scanner_version=scan.scanner_version,
+        findings_count=len(findings),
+        total_tests=scan.total_tests,
+        completed_tests=scan.completed_tests,
+        passed_tests=scan.passed_tests,
+        failed_tests=scan.failed_tests,
+        inconclusive_tests=scan.inconclusive_tests,
+        skipped_tests=scan.skipped_tests,
+        execution_errors=scan.execution_errors,
+        cancellation_reason=scan.cancellation_reason,
+        failure_reason=scan.failure_reason,
+    )
+
+
+@router.get("/projects/{project_id}/scans", response_model=ScanListResponse)
+def list_project_scans(
+    project_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ScanListResponse:
+    """Retrieve paginated scan records scoped to an enterprise project."""
+    res = ScanService.list_project_scans(
+        db=db, project_id=project_id, user_id=user_id, skip=skip, limit=limit, status=status
+    )
+    items = []
+    for s in res["items"]:
+        findings = ScanService.get_findings_for_scan(db=db, scan_id=s.id, user_id=user_id)
+        items.append(
+            ScanResponse(
+                id=s.id,
+                project_id=s.project_id,
+                user_id=s.user_id,
+                preset=s.preset,
+                target_identifier=s.target_identifier,
+                status=s.status,
+                configuration=s.configuration,
+                configuration_snapshot=s.configuration_snapshot,
+                start_timestamp=s.start_timestamp.isoformat(),
+                completion_timestamp=s.completion_timestamp.isoformat() if s.completion_timestamp else None,
+                summary=s.summary,
+                scanner_version=s.scanner_version,
+                findings_count=len(findings),
+                total_tests=s.total_tests,
+                completed_tests=s.completed_tests,
+                passed_tests=s.passed_tests,
+                failed_tests=s.failed_tests,
+                inconclusive_tests=s.inconclusive_tests,
+                skipped_tests=s.skipped_tests,
+                execution_errors=s.execution_errors,
+                cancellation_reason=s.cancellation_reason,
+                failure_reason=s.failure_reason,
+            )
+        )
+    return ScanListResponse(total=res["total"], items=items)
 

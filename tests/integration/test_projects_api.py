@@ -243,3 +243,4 @@ def test_project_preferences_api(client: TestClient):
         assert updated["agent_security"] is True
     finally:
         client.delete(f"/api/v1/projects/{pid}", headers=headers)
+

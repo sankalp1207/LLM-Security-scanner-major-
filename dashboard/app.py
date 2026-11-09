@@ -16,8 +16,10 @@ from dashboard.components import (
     render_header,
     render_stepper,
     render_top_navbar,
+    scan_preset_badge,
     severity_badge,
     status_badge,
+    test_outcome_badge,
 )
 from dashboard.theme import inject_custom_theme
 
@@ -886,90 +888,387 @@ if page == "📊 Dashboard":
 
 
 # =============================================================================
-# 2. SECURITY SCANNER (EXECUTE SCANS)
+# 2. SECURITY SCANNER (ONE-CLICK PRESETS, CAPABILITY RESOLUTION & TELEMETRY)
 # =============================================================================
 elif page == "🚀 Security Scanner":
     render_header(
         "Automated Security Scanner",
-        "Configure and execute bounded red-team vulnerability probes against authorized LLM endpoints.",
+        "One-click, policy-bounded security assessments with preset configurations and deep test telemetry.",
         badge="Engine v1.0",
     )
 
-    # Check for active project target URL
-    default_url = "http://127.0.0.1:8000/api/v1/demo-rag/query"
-    if st.session_state.get("prefill_target_url"):
-        default_url = st.session_state["prefill_target_url"]
-    elif active_project_data and active_project_data.get("target_configuration"):
-        default_url = active_project_data["target_configuration"].get("endpoint_url", default_url)
+    # -------------------------------------------------------------------------
+    # SUB-VIEW: DISPLAY RESULTS IF ACTIVE SCAN IN SESSION
+    # -------------------------------------------------------------------------
+    active_scan_id = st.session_state.get("active_scan_id")
+    if active_scan_id:
+        active_scan = api.get_scan(active_scan_id)
+        if not active_scan:
+            st.warning(f"Scan `{active_scan_id}` not found or expired.")
+            st.session_state.pop("active_scan_id", None)
+            st.rerun()
 
-    with st.form("scanner_launch_form"):
-        st.markdown(f"#### 🎯 Target Configuration (Workspace: `{active_project_name}`)")
-        target_url = st.text_input(
-            "Target Endpoint URL",
-            value=default_url,
-            help="HTTP/HTTPS endpoint accepting JSON {'query': '...'} payloads",
+        scan_status = active_scan.get("status", "COMPLETED")
+        scan_preset = active_scan.get("preset", "quick_scan")
+
+        # Top Results Header
+        c_head1, c_head2 = st.columns([3, 1])
+        c_head1.markdown(
+            f"""
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                <h3 style="margin: 0; color: #f8fafc;">Scan Telemetry: <code>{active_scan_id[:8]}...</code></h3>
+                {status_badge(scan_status)}
+                {scan_preset_badge(scan_preset)}
+            </div>
+            <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 18px;">
+                Target: <code>{active_scan.get('target_identifier', '')}</code> | Started: {active_scan.get('start_timestamp', '')[:19]}
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        categories = st.multiselect(
-            "Threat Categories to Audit",
-            options=["prompt_injection", "indirect_prompt_injection", "jailbreak", "data_leakage"],
-            default=["prompt_injection", "indirect_prompt_injection", "jailbreak", "data_leakage"],
-            help="Select threat categories corresponding to OWASP LLM Top 10 vulnerabilities.",
-        )
+        if c_head2.button("🔄 Start Another Scan", use_container_width=True):
+            st.session_state.pop("active_scan_id", None)
+            st.rerun()
 
-        col_a, col_b = st.columns(2)
-        concurrency = col_a.slider("Max Concurrency", min_value=1, max_value=10, value=3)
-        timeout = col_b.slider("Per-Request Timeout (seconds)", min_value=1.0, max_value=30.0, value=10.0)
+        if scan_status in ("CREATED", "QUEUED", "RUNNING"):
+            st.info(f"⏳ Scan is currently in **{scan_status}** state. Executing bounded security probes...")
+            st.progress(0.65)
+            c_poll, c_cancel = st.columns([1, 1])
+            if c_poll.button("🔄 Refresh Telemetry", use_container_width=True):
+                st.rerun()
+            if c_cancel.button("⏹️ Cancel Active Scan", use_container_width=True):
+                c_res = api.cancel_scan(active_scan_id)
+                st.warning("Cancellation requested.")
+                st.rerun()
+        else:
+            # Completed Scan Summary Metrics
+            summary = active_scan.get("summary", {})
+            total_t = active_scan.get("total_tests") or summary.get("total_tests", 0)
+            passed_t = active_scan.get("passed_tests") or summary.get("tests_passed", 0)
+            failed_t = active_scan.get("failed_tests") or summary.get("tests_failed", 0)
+            inconcl_t = active_scan.get("inconclusive_tests") or summary.get("inconclusive_tests", 0)
+            skipped_t = active_scan.get("skipped_tests") or summary.get("tests_skipped", 0)
+            findings_count = active_scan.get("findings_count", 0)
 
-        st.markdown("#### ⚡ Adversarial Mutation & Fuzzing Settings")
-        enable_mutations = st.checkbox(
-            "Enable Adversarial Mutation Fuzzing",
-            value=True,
-            help="Applies evasive transformations (Base64, Leetspeak, Homoglyphs, ROT13, Delimiters, Hypothetical) to test guardrail bypass resilience.",
-        )
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Total Tests", total_t)
+            k2.metric("Tests Passed", passed_t, delta="Safe" if passed_t > 0 else None)
+            k3.metric("Vulnerabilities", failed_t, delta="-Risks" if failed_t > 0 else "0", delta_color="inverse")
+            k4.metric("Inconclusive / Skipped", f"{inconcl_t} / {skipped_t}")
+            k5.metric("Confirmed Findings", findings_count)
 
-        selected_mutations = st.multiselect(
-            "Active Mutation Strategies",
-            options=["base64", "leetspeak", "homoglyph", "rot13", "delimiter", "hypothetical"],
-            default=["base64", "leetspeak", "homoglyph", "rot13", "delimiter"],
-        )
+            if active_scan.get("cancellation_reason"):
+                st.warning(f"Scan was terminated: **{active_scan['cancellation_reason']}**")
+            elif active_scan.get("failure_reason"):
+                st.error(f"Scan failed: **{active_scan['failure_reason']}**")
 
-        is_external = "127.0.0.1" not in target_url and "localhost" not in target_url
-        ext_auth = False
-        if is_external:
-            ext_auth = st.checkbox(
-                "I explicitly confirm that I am authorized to conduct security assessments against this external endpoint."
+            # Result Tabs: Findings, Individual Test Telemetry, Config Snapshot
+            tab_findings, tab_telemetry, tab_config = st.tabs([
+                f"🚨 Confirmed Findings ({findings_count})",
+                f"🧪 Individual Test Telemetry ({total_t})",
+                "⚙️ Scan Configuration Snapshot",
+            ])
+
+            with tab_findings:
+                findings_data = api.get_findings_for_scan(active_scan_id)
+                if not findings_data:
+                    st.success("🎉 No vulnerabilities or exploitable policy violations detected in this scan run.")
+                else:
+                    for f in findings_data:
+                        sev_html = severity_badge(f.get("severity", "MEDIUM"))
+                        cat_label = f.get("category", "").replace("_", " ").title()
+                        with st.expander(f"{f.get('title', 'Vulnerability Finding')} — {f.get('severity')}"):
+                            st.markdown(
+                                f"""
+                                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                                    {sev_html}
+                                    <span style="font-size: 0.8rem; color: #94a3b8;">Category: <strong>{cat_label}</strong></span>
+                                    <span style="font-size: 0.8rem; color: #94a3b8;">Component: <code>{f.get('target_component', 'app')}</code></span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+                            st.write(f"**Explanation:** {f.get('description', '')}")
+                            st.markdown("##### 🔍 Evidence Captured")
+                            st.json(f.get("evidence", {}))
+                            if f.get("remediation"):
+                                st.markdown(f"**🛡️ Remediation:** {f['remediation']}")
+
+                            if st.button("🧪 Retest Vulnerability Mitigation", key=f"retest_{f['id']}"):
+                                with st.spinner("Retesting payload against defensive guardrails..."):
+                                    retest_res = api.retest_finding(f["id"])
+                                    st.success(f"Retest Result: `{retest_res.get('retest_status')}`")
+                                    st.rerun()
+
+            with tab_telemetry:
+                tests_resp = api.get_scan_tests(active_scan_id, limit=200)
+                tests_list = tests_resp.get("items", [])
+                if not tests_list:
+                    st.info("No detailed per-test execution records found.")
+                else:
+                    telemetry_rows = []
+                    for t_item in tests_list:
+                        telemetry_rows.append({
+                            "Test ID": t_item.get("test_case_id", ""),
+                            "Category": t_item.get("category", ""),
+                            "Outcome": t_item.get("execution_status", ""),
+                            "Latency (ms)": t_item.get("latency_ms", 0.0),
+                            "HTTP Status": t_item.get("response_status") or "Err",
+                            "Observed Preview": (t_item.get("observed_behavior") or "")[:80] + "...",
+                        })
+                    st.dataframe(pd.DataFrame(telemetry_rows), use_container_width=True)
+
+            with tab_config:
+                st.markdown("#### Configuration Snapshot at Execution")
+                st.json(active_scan.get("configuration_snapshot") or active_scan.get("configuration") or {})
+
+    # -------------------------------------------------------------------------
+    # MAIN CONFIGURATION & ONE-CLICK SCAN LAUNCH CONSOLE
+    # -------------------------------------------------------------------------
+    else:
+        # SECTION A: PROJECT CONTEXT & TARGET STATUS
+        st.markdown("### 📁 Section A: Project & Target Scope")
+        proj_list = api.list_projects().get("items", [])
+
+        if not proj_list:
+            empty_state(
+                "No Projects Available",
+                "Create a project via Project Setup or explore the Local Demo to initialize scanner scope.",
+                icon="📁",
+            )
+        else:
+            proj_names = [p["name"] for p in proj_list]
+            curr_idx = 0
+            if active_project_name in proj_names:
+                curr_idx = proj_names.index(active_project_name)
+
+            selected_proj_name = st.selectbox(
+                "Active Project Context",
+                options=proj_names,
+                index=curr_idx,
+                help="Select the project workspace to audit",
             )
 
-        submit_btn = st.form_submit_button("🚀 Launch Security Audit", use_container_width=True)
+            # Retrieve active project details
+            selected_proj = next((p for p in proj_list if p["name"] == selected_proj_name), proj_list[0])
+            st.session_state["active_project_id"] = selected_proj["id"]
+            st.session_state["active_project_name"] = selected_proj["name"]
+            proj_id = selected_proj["id"]
 
-    if submit_btn:
-        if is_external and not ext_auth:
-            st.error("❌ Non-local targets require explicit authorization acknowledgement.")
-        else:
-            with st.spinner("Executing automated security tests against target..."):
-                payload = {
-                    "target_url": target_url,
-                    "categories": categories,
-                    "max_concurrency": concurrency,
-                    "timeout_seconds": timeout,
-                    "external_target_authorized": ext_auth,
-                    "enable_mutation_fuzzing": enable_mutations,
-                    "mutation_types": selected_mutations if enable_mutations else None,
-                }
-                res = api.create_scan(payload)
+            tc_data = selected_proj.get("target_configuration") or {}
+            conn_status = tc_data.get("connection_status", "UNVERIFIED")
+            endpoint_url = tc_data.get("endpoint_url", "http://127.0.0.1:8000/api/v1/demo-rag/query")
 
-                if "error" in res:
-                    st.error(f"❌ Scan execution failed: {res['error']}")
+            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+            p_col1.markdown(f"**App Type:** `{selected_proj.get('application_type', 'rag').upper()}`")
+            p_col2.markdown(f"**Environment:** `{selected_proj.get('environment', 'dev').title()}`")
+            p_col3.markdown(f"**Target Type:** `{selected_proj.get('target_type', 'demo').upper()}`")
+            p_col4.markdown(f"**Status:** {connection_status_badge(conn_status)}", unsafe_allow_html=True)
+            st.caption(f"Configured Destination URL: `{endpoint_url}`")
+
+            st.divider()
+
+            # SECTION B: SCAN MODE PRESET CARDS
+            st.markdown("### ⚡ Section B: Select Scan Mode Preset")
+            presets_data = api.get_scan_presets()
+            if not presets_data:
+                # Fallback presets definition
+                presets_data = [
+                    {
+                        "preset_id": "quick_scan",
+                        "name": "Quick Scan",
+                        "description": "Fast baseline security assessment designed for rapid developer feedback and continuous integration checks.",
+                        "enabled_categories": ["prompt_injection", "jailbreak", "data_leakage"],
+                        "max_tests": 15,
+                        "resource_intensity": "low",
+                        "recommended_use_case": "Local development, pre-commit validation, and smoke testing.",
+                    },
+                    {
+                        "preset_id": "full_scan",
+                        "name": "Full Scan",
+                        "description": "Comprehensive multi-category security audit examining injections, jailbreaks, data leaks, and pipeline integrity.",
+                        "enabled_categories": ["prompt_injection", "indirect_prompt_injection", "jailbreak", "data_leakage"],
+                        "max_tests": 60,
+                        "resource_intensity": "medium",
+                        "recommended_use_case": "Staging security audits, release candidate readiness, and scheduled audits.",
+                    },
+                    {
+                        "preset_id": "deep_red_team",
+                        "name": "Deep Red Team",
+                        "description": "Advanced adversarial testing combining base test suites with automated mutation fuzzing to assess evasion resilience.",
+                        "enabled_categories": ["prompt_injection", "indirect_prompt_injection", "jailbreak", "data_leakage"],
+                        "max_tests": 120,
+                        "resource_intensity": "high",
+                        "recommended_use_case": "Pre-production security certification, penetration testing, and defense-in-depth fuzzing.",
+                    },
+                ]
+
+            preset_cols = st.columns(len(presets_data))
+            if "selected_preset_id" not in st.session_state:
+                st.session_state["selected_preset_id"] = "quick_scan"
+
+            for idx, p_item in enumerate(presets_data):
+                p_id = p_item["preset_id"]
+                is_selected = st.session_state["selected_preset_id"] == p_id
+                border_style = "2px solid #8b5cf6" if is_selected else "1px solid rgba(255,255,255,0.08)"
+                bg_style = "rgba(139, 92, 246, 0.08)" if is_selected else "rgba(17, 24, 39, 0.6)"
+
+                with preset_cols[idx]:
+                    st.markdown(
+                        f"""
+                        <div style="background: {bg_style}; border: {border_style}; border-radius: 12px; padding: 16px; margin-bottom: 12px; min-height: 220px; display: flex; flex-direction: column; justify-content: space-between;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <h4 style="margin: 0; color: #f8fafc; font-size: 1.05rem;">{p_item['name']}</h4>
+                                    <span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; color: #cbd5e1;">{p_item.get('resource_intensity', 'std')}</span>
+                                </div>
+                                <p style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4; margin-bottom: 10px;">{p_item['description']}</p>
+                                <div style="font-size: 0.75rem; color: #a78bfa; margin-bottom: 4px;"><strong>Tests:</strong> Up to ~{p_item.get('max_tests', 20)} test probes</div>
+                                <div style="font-size: 0.72rem; color: #64748b;"><strong>Best for:</strong> {p_item.get('recommended_use_case', '')}</div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    btn_label = "✓ Selected Mode" if is_selected else f"Select {p_item['name']}"
+                    if st.button(btn_label, key=f"btn_preset_{p_id}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                        st.session_state["selected_preset_id"] = p_id
+                        st.rerun()
+
+            active_preset_id = st.session_state["selected_preset_id"]
+            active_preset = next((p for p in presets_data if p["preset_id"] == active_preset_id), presets_data[0])
+
+            st.divider()
+
+            # SECTION C: TARGET CAPABILITY & CATEGORY SELECTION
+            st.markdown("### 🎯 Section C: Target Capabilities & Testing Scope")
+            cap_report = api.get_project_scan_capabilities(proj_id)
+            if cap_report:
+                caps = cap_report.get("detected_capabilities", [])
+                cap_tags = " ".join([f'<span style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: #c7d2fe; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; margin-right: 6px;">✓ {c.replace("_", " ").title()}</span>' for c in caps])
+                st.markdown(f"**Detected Target Capabilities:** {cap_tags}", unsafe_allow_html=True)
+
+                skipped_cats = cap_report.get("skipped_categories", [])
+                if skipped_cats:
+                    for sk in skipped_cats:
+                        st.info(f"ℹ️ **{sk.get('category', '').replace('_', ' ').title()} skipped:** {sk.get('reason', '')}")
+
+                applicable_cats = cap_report.get("applicable_categories", ["prompt_injection", "jailbreak", "data_leakage"])
+            else:
+                applicable_cats = ["prompt_injection", "jailbreak", "data_leakage", "indirect_prompt_injection"]
+
+            # Category review
+            default_cats = [c for c in active_preset.get("enabled_categories", applicable_cats) if c in applicable_cats]
+            chosen_categories = st.multiselect(
+                "Active Threat Categories for this Audit",
+                options=applicable_cats,
+                default=default_cats,
+                help="Categories verified to be compatible with target capabilities.",
+            )
+
+            st.divider()
+
+            # SECTION D: ADVANCED CONFIGURATION
+            st.markdown("### 🛠️ Section D: Advanced Configuration & Safety Controls")
+            with st.expander("Configure Execution Limits, Concurrency & Fuzzing (Optional)", expanded=False):
+                adv_col1, adv_col2 = st.columns(2)
+                preset_max = active_preset.get("max_tests", 30)
+                cfg_max_tests = adv_col1.slider(
+                    "Test Budget Ceiling (Max Tests)",
+                    min_value=5,
+                    max_value=max(preset_max, 150),
+                    value=preset_max,
+                )
+                cfg_concurrency = adv_col2.slider(
+                    "Execution Concurrency",
+                    min_value=1,
+                    max_value=10,
+                    value=min(active_preset.get("max_concurrency", 3), 10),
+                )
+                adv_col3, adv_col4 = st.columns(2)
+                cfg_timeout = adv_col3.slider(
+                    "Request Timeout (seconds)",
+                    min_value=2.0,
+                    max_value=30.0,
+                    value=float(active_preset.get("request_timeout", 8.0)),
+                )
+                cfg_fuzzing = adv_col4.checkbox(
+                    "Enable Adversarial Mutation Fuzzing",
+                    value=active_preset.get("mutation_fuzzing", False) or active_preset_id == "deep_red_team",
+                    help="Applies evasive transformations (Base64, Leetspeak, Homoglyphs, ROT13, Delimiters) to test guardrail resilience.",
+                )
+
+                if cfg_fuzzing:
+                    cfg_mutation_types = st.multiselect(
+                        "Mutation Strategies",
+                        options=["base64", "leetspeak", "homoglyph", "rot13", "delimiter", "hypothetical"],
+                        default=["base64", "leetspeak", "homoglyph", "rot13", "delimiter"],
+                    )
                 else:
-                    st.success(f"✅ Security scan completed successfully! Scan ID: `{res['id']}`")
-                    sum_data = res.get("summary", {})
+                    cfg_mutation_types = None
 
-                    r1, r2, r3, r4 = st.columns(4)
-                    r1.metric("Tests Executed", sum_data.get("total_tests", 0))
-                    r2.metric("Tests Passed", sum_data.get("tests_passed", 0))
-                    r3.metric("Vulnerabilities Identified", sum_data.get("tests_failed", 0))
-                    r4.metric("Mutated Probes Run", sum_data.get("mutated_tests_run", 0))
+            # Authorization Acknowledgement for External Targets
+            is_external_target = selected_proj.get("target_type") == "external_api" or (
+                "127.0.0.1" not in endpoint_url and "localhost" not in endpoint_url and "testserver" not in endpoint_url
+            )
+            auth_acknowledged = False
+            if is_external_target:
+                st.warning("⚠️ **External Target Detected:** Explicit authorization acknowledgement is mandatory.")
+                auth_acknowledged = st.checkbox(
+                    "I explicitly certify that I am legally authorized to conduct non-destructive security testing against this external endpoint.",
+                    value=False,
+                )
+
+            st.divider()
+
+            # SECTION E: SCAN SUMMARY & LAUNCH BUTTON
+            st.markdown("### 📋 Section E: Execution Plan Summary")
+            st.markdown(
+                f"""
+                <div style="background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 12px; padding: 18px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div>
+                            <span style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">Ready to audit: <code>{selected_proj_name}</code></span>
+                        </div>
+                        {scan_preset_badge(active_preset_id)}
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; font-size: 0.85rem; color: #94a3b8;">
+                        <div><strong>Target Endpoint:</strong><br><code style="font-size: 0.78rem;">{endpoint_url}</code></div>
+                        <div><strong>Categories:</strong><br><span style="color: #cbd5e1;">{len(chosen_categories)} active categories</span></div>
+                        <div><strong>Max Budget:</strong><br><span style="color: #cbd5e1;">Up to {cfg_max_tests} test probes</span></div>
+                        <div><strong>Fuzzing:</strong><br><span style="color: {'#10b981' if cfg_fuzzing else '#64748b'};">{'Enabled' if cfg_fuzzing else 'Disabled'}</span></div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            if st.button("🚀 START SECURITY SCAN", use_container_width=True, type="primary"):
+                if is_external_target and not auth_acknowledged:
+                    st.error("❌ External targets require explicit authorization acknowledgement. Please check the authorization box above.")
+                elif not chosen_categories:
+                    st.error("❌ Please select at least one threat category to test.")
+                else:
+                    with st.spinner(f"Initiating {active_preset['name']} audit for '{selected_proj_name}'..."):
+                        payload = {
+                            "preset": active_preset_id,
+                            "categories": chosen_categories,
+                            "custom_max_tests": cfg_max_tests,
+                            "custom_concurrency": cfg_concurrency,
+                            "custom_timeout_seconds": cfg_timeout,
+                            "enable_mutation_fuzzing": cfg_fuzzing,
+                            "mutation_types": cfg_mutation_types if cfg_fuzzing else None,
+                            "external_target_authorized": auth_acknowledged,
+                            "sync_execute": True,
+                        }
+                        res = api.create_project_scan(proj_id, payload)
+                        if "error" in res:
+                            st.error(f"❌ Scan failed: {res['error']}")
+                        else:
+                            st.success(f"✅ Security scan completed! Scan ID: `{res['id']}`")
+                            st.session_state["active_scan_id"] = res["id"]
+                            st.rerun()
 
 
 # =============================================================================
@@ -1236,12 +1535,12 @@ elif page == "🕸️ Attack Graph":
 
 
 # =============================================================================
-# 8. SECURITY HISTORY
+# 8. SECURITY HISTORY (COMPREHENSIVE AUDIT TRAIL & TELEMETRY INSPECTOR)
 # =============================================================================
 elif page == "📜 Security History":
     render_header(
         "Security Audit Run History",
-        "Comprehensive historical audit trail of all automated security scans and evaluation runs.",
+        "Comprehensive historical audit trail of all automated security scans and per-test execution telemetry.",
         badge="Audit History",
     )
 
@@ -1249,22 +1548,101 @@ elif page == "📜 Security History":
     if not scans:
         empty_state("No Scan History Recorded", "Run your first security scan to populate audit logs.", icon="📜")
     else:
-        st.write(f"Total Audit Runs: **{len(scans)}**")
-        history_table = []
+        # Filter controls
+        f_col1, f_col2, f_col3 = st.columns([2, 1, 1])
+        search_kw = f_col1.text_input("🔍 Search History", placeholder="Search by Scan ID, endpoint, or preset...")
+        status_opts = ["ALL", "COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED", "RUNNING"]
+        selected_status = f_col2.selectbox("Filter Status", options=status_opts, index=0)
+
+        # Unique projects from scans
+        proj_dict = {p["id"]: p["name"] for p in api.list_projects().get("items", [])}
+        all_proj_opts = ["All Projects"] + list(proj_dict.values())
+        selected_proj_filter = f_col3.selectbox("Filter Project", options=all_proj_opts, index=0)
+
+        # Apply filters
+        filtered_scans = []
         for s in scans:
-            summary = s.get("summary", {})
-            history_table.append({
+            s_id = s.get("id", "")
+            target = s.get("target_identifier", "")
+            preset = s.get("preset", "") or s.get("configuration", {}).get("preset", "")
+            st_val = s.get("status", "")
+            p_id = s.get("project_id", "")
+            p_name = proj_dict.get(p_id, "Default / Global")
+
+            if search_kw:
+                kw = search_kw.lower()
+                if kw not in s_id.lower() and kw not in target.lower() and kw not in preset.lower():
+                    continue
+
+            if selected_status != "ALL" and st_val != selected_status:
+                continue
+
+            if selected_proj_filter != "All Projects" and p_name != selected_proj_filter:
+                continue
+
+            filtered_scans.append(s)
+
+        st.caption(f"Displaying **{len(filtered_scans)}** of **{len(scans)}** total audit runs")
+
+        history_rows = []
+        for s in filtered_scans:
+            sum_d = s.get("summary", {})
+            history_rows.append({
                 "Scan ID": s["id"],
+                "Preset": (s.get("preset") or sum_d.get("preset", "quick_scan")).replace("_", " ").upper(),
                 "Target Endpoint": s.get("target_identifier", ""),
                 "Status": s.get("status", ""),
-                "Total Tests": summary.get("total_tests", 0),
-                "Passed": summary.get("tests_passed", 0),
-                "Failed": summary.get("tests_failed", 0),
+                "Tests": s.get("total_tests") or sum_d.get("total_tests", 0),
+                "Passed": s.get("passed_tests") or sum_d.get("tests_passed", 0),
+                "Failed": s.get("failed_tests") or sum_d.get("tests_failed", 0),
                 "Findings": s.get("findings_count", 0),
-                "Fuzzing": "Enabled" if summary.get("mutation_fuzzing_enabled") else "Disabled",
                 "Timestamp": s.get("start_timestamp", "")[:19],
             })
-        st.dataframe(pd.DataFrame(history_table), use_container_width=True)
+
+        if history_rows:
+            st.dataframe(pd.DataFrame(history_rows), use_container_width=True)
+
+            st.divider()
+            st.markdown("### 🔍 Inspect Scan Execution & Telemetry")
+            scan_id_options = [s["id"] for s in filtered_scans]
+            inspect_scan_id = st.selectbox("Select Scan to Inspect", options=scan_id_options)
+
+            if inspect_scan_id:
+                scan_detail = next((s for s in filtered_scans if s["id"] == inspect_scan_id), None)
+                if scan_detail:
+                    insp_col1, insp_col2 = st.columns([3, 1])
+                    insp_col1.markdown(
+                        f"""
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                            <h4 style="margin: 0; color: #f8fafc;">Scan <code>{inspect_scan_id}</code></h4>
+                            {status_badge(scan_detail.get('status', ''))}
+                            {scan_preset_badge(scan_detail.get('preset') or 'quick_scan')}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if insp_col2.button("🚀 Open in Scanner View", key=f"open_view_{inspect_scan_id}"):
+                        st.session_state["active_scan_id"] = inspect_scan_id
+                        st.rerun()
+
+                    # Telemetry table for selected scan
+                    t_resp = api.get_scan_tests(inspect_scan_id, limit=100)
+                    t_items = t_resp.get("items", [])
+                    if t_items:
+                        st.markdown("##### 🧪 Test Execution Records")
+                        t_rows = [{
+                            "Test ID": t.get("test_case_id"),
+                            "Category": t.get("category"),
+                            "Outcome": t.get("execution_status"),
+                            "Latency (ms)": t.get("latency_ms"),
+                            "HTTP Status": t.get("response_status"),
+                            "Observed Preview": (t.get("observed_behavior") or "")[:80] + "...",
+                        } for t in t_items]
+                        st.dataframe(pd.DataFrame(t_rows), use_container_width=True)
+                    else:
+                        st.info("No test execution records recorded for this scan.")
+        else:
+            st.info("No scans match the selected filter criteria.")
 
 
 # =============================================================================
