@@ -63,6 +63,7 @@ class Scan(Base):
     # Relationships
     findings = relationship("Finding", back_populates="scan", cascade="all, delete-orphan")
     test_executions = relationship("TestExecution", back_populates="scan", cascade="all, delete-orphan")
+    events = relationship("ScanEvent", back_populates="scan", cascade="all, delete-orphan")
     project = relationship("Project", back_populates="scans")
 
 
@@ -122,6 +123,28 @@ class TestExecution(Base):
 
     # Relationships
     scan = relationship("Scan", back_populates="test_executions")
+
+
+class ScanEvent(Base):
+    """Database model for structured scan lifecycle and execution progress events."""
+
+    __tablename__ = "scan_events"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    scan_id = Column(String(64), ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False, index=True)
+    payload = Column(JSON, default=dict, nullable=False)
+    version = Column(String(16), default="1.0", nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    scan = relationship("Scan", back_populates="events")
 
 
 class TestSuiteVersion(Base):

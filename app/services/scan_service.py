@@ -19,6 +19,7 @@ from app.database.repository import (
 from app.scanner.orchestrator import ScanOrchestrator
 from app.scanner.target_client import TargetClient
 from app.schemas.presets import get_preset_by_id
+from app.schemas.events import ScanEventType
 from app.schemas.scans import (
     ProjectScanCreateRequest,
     ScanCreateRequest,
@@ -27,6 +28,7 @@ from app.schemas.scans import (
 )
 from app.services.capability_service import CapabilityService
 from app.services.connection_verifier import ConnectionVerifier
+from app.services.event_service import ScanEventService
 
 logger = logging.getLogger("scan_service")
 
@@ -211,6 +213,31 @@ class ScanService:
         # Transition to QUEUED
         ScanRepository.update_scan_status(db=db, scan_id=scan.id, status="QUEUED")
 
+        # Emit initial lifecycle events
+        ScanEventService.publish_event(
+            scan_id=scan.id,
+            event_type=ScanEventType.SCAN_CREATED.value,
+            payload={
+                "project_id": project.id,
+                "preset": preset_config.preset_id,
+                "target_url": endpoint_url,
+                "total_tests": scan.total_tests,
+            },
+            db=db,
+            persist=True,
+        )
+        ScanEventService.publish_event(
+            scan_id=scan.id,
+            event_type=ScanEventType.SCAN_QUEUED.value,
+            payload={
+                "project_id": project.id,
+                "preset": preset_config.preset_id,
+                "total_tests": scan.total_tests,
+            },
+            db=db,
+            persist=True,
+        )
+
         # 8. Execution
         if http_client is None and "testserver" in endpoint_url:
             from httpx import ASGITransport, AsyncClient
@@ -304,6 +331,20 @@ class ScanService:
             configuration_snapshot=config_dict,
             status="QUEUED",
         )
+        ScanEventService.publish_event(
+            scan_id=scan.id,
+            event_type=ScanEventType.SCAN_CREATED.value,
+            payload={"target_url": request.target_url},
+            db=db,
+            persist=True,
+        )
+        ScanEventService.publish_event(
+            scan_id=scan.id,
+            event_type=ScanEventType.SCAN_QUEUED.value,
+            payload={"target_url": request.target_url},
+            db=db,
+            persist=True,
+        )
 
         if http_client is None and "testserver" in request.target_url:
             from httpx import ASGITransport, AsyncClient
@@ -346,6 +387,13 @@ class ScanService:
             return scan
 
         cancelled = ScanRepository.cancel_scan(db, scan_id=scan_id, reason=reason)
+        ScanEventService.publish_event(
+            scan_id=scan_id,
+            event_type=ScanEventType.SCAN_CANCELLED.value,
+            payload={"reason": reason},
+            db=db,
+            persist=True,
+        )
         return cancelled
 
     @staticmethod

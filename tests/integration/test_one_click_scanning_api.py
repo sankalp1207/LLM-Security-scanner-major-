@@ -317,3 +317,4 @@ def test_project_scan_ownership_isolation(client: TestClient):
         assert res_scan.status_code in (403, 404)
     finally:
         client.delete(f"/api/v1/projects/{pid}", headers=user_a)
+

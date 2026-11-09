@@ -226,3 +226,4 @@ def test_scan_cancellation_lifecycle():
     finally:
         ScanRepository.delete_scan(db=db, scan_id=scan_id)
         db.close()
+

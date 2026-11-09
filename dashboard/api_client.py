@@ -413,3 +413,35 @@ class ScannerAPIClient:
         except Exception as e:
             return {"error": str(e)}
 
+    def get_scan_progress(self, scan_id: str) -> Dict[str, Any]:
+        """Fetch real-time scan progress snapshot and telemetry counts."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/scans/{scan_id}/progress")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def get_scan_events(
+        self,
+        scan_id: str,
+        since_seq: int = 0,
+        limit: int = 100,
+        event_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fetch chronological scan events with cursor-based replay support."""
+        try:
+            params = f"since_seq={since_seq}&limit={limit}"
+            if event_type:
+                params += f"&event_type={event_type}"
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{self.api_v1}/scans/{scan_id}/events?{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+

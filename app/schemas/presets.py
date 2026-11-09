@@ -101,3 +101,4 @@ def get_preset_by_id(preset_id: str) -> Optional[ScanPresetConfig]:
 def list_presets() -> List[ScanPresetConfig]:
     """List all available scan presets."""
     return list(SCAN_PRESETS.values())
+

@@ -11,6 +11,7 @@ from app.database.models import (
     ModelEvaluation,
     Project,
     Scan,
+    ScanEvent,
     SecurityTestCase,
     TargetConfiguration,
     TestExecution,
@@ -924,4 +925,62 @@ class UserOnboardingRepository:
         db.commit()
         db.refresh(record)
         return record
+
+
+class ScanEventRepository:
+    """Repository managing structured scan lifecycle and execution event persistence."""
+
+    @staticmethod
+    def create_event(
+        db: Session,
+        scan_id: str,
+        event_type: str,
+        sequence: int,
+        payload: dict,
+        version: str = "1.0",
+        event_id: Optional[str] = None,
+    ) -> ScanEvent:
+        """Create and persist a scan event record."""
+        event = ScanEvent(
+            id=event_id,
+            scan_id=scan_id,
+            event_type=event_type,
+            sequence=sequence,
+            payload=payload or {},
+            version=version,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        return event
+
+    @staticmethod
+    def list_events_by_scan(
+        db: Session,
+        scan_id: str,
+        since_seq: int = 0,
+        limit: int = 100,
+        event_type: Optional[str] = None,
+    ) -> List[ScanEvent]:
+        """Fetch chronological scan events with cursor pagination based on sequence number."""
+        q = db.query(ScanEvent).filter(
+            ScanEvent.scan_id == scan_id,
+            ScanEvent.sequence > since_seq,
+        )
+        if event_type:
+            q = q.filter(ScanEvent.event_type == event_type.upper())
+        return q.order_by(ScanEvent.sequence.asc()).limit(limit).all()
+
+    @staticmethod
+    def get_latest_sequence(db: Session, scan_id: str) -> int:
+        """Retrieve the maximum sequence number recorded for a scan, or 0 if none exist."""
+        max_seq = db.query(func.max(ScanEvent.sequence)).filter(ScanEvent.scan_id == scan_id).scalar()
+        return max_seq or 0
+
+    @staticmethod
+    def count_events(db: Session, scan_id: str) -> int:
+        """Count total events for a scan."""
+        return db.query(func.count(ScanEvent.id)).filter(ScanEvent.scan_id == scan_id).scalar() or 0
+
 

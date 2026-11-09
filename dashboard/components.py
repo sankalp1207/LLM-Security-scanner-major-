@@ -301,3 +301,70 @@ def test_outcome_badge(status: str) -> str:
     )
 
 
+def event_type_badge(event_type: str) -> str:
+    """Return styled HTML badge for real-time scan event types."""
+    ev = str(event_type).upper()
+    colors = {
+        "SCAN_CREATED": {"bg": "rgba(148, 163, 184, 0.15)", "text": "#cbd5e1", "border": "#64748b"},
+        "SCAN_QUEUED": {"bg": "rgba(245, 158, 11, 0.15)", "text": "#fcd34d", "border": "#f59e0b"},
+        "SCAN_STARTED": {"bg": "rgba(59, 130, 246, 0.15)", "text": "#93c5fd", "border": "#3b82f6"},
+        "TARGET_VERIFIED": {"bg": "rgba(16, 185, 129, 0.15)", "text": "#6ee7b7", "border": "#10b981"},
+        "TEST_STARTED": {"bg": "rgba(99, 102, 241, 0.15)", "text": "#a5b4fc", "border": "#6366f1"},
+        "TEST_COMPLETED": {"bg": "rgba(16, 185, 129, 0.15)", "text": "#6ee7b7", "border": "#10b981"},
+        "TEST_FAILED": {"bg": "rgba(239, 68, 68, 0.15)", "text": "#fca5a5", "border": "#ef4444"},
+        "FINDING_CREATED": {"bg": "rgba(220, 38, 38, 0.25)", "text": "#f87171", "border": "#ef4444"},
+        "CATEGORY_COMPLETED": {"bg": "rgba(168, 85, 247, 0.15)", "text": "#d8b4fe", "border": "#a855f7"},
+        "SCAN_PROGRESS": {"bg": "rgba(14, 165, 233, 0.15)", "text": "#7dd3fc", "border": "#0ea5e9"},
+        "SCAN_WARNING": {"bg": "rgba(245, 158, 11, 0.2)", "text": "#fcd34d", "border": "#f59e0b"},
+        "SCAN_ERROR": {"bg": "rgba(239, 68, 68, 0.25)", "text": "#fca5a5", "border": "#ef4444"},
+        "SCAN_CANCELLED": {"bg": "rgba(100, 116, 139, 0.2)", "text": "#94a3b8", "border": "#64748b"},
+        "SCAN_COMPLETED": {"bg": "rgba(16, 185, 129, 0.2)", "text": "#6ee7b7", "border": "#10b981"},
+        "SCAN_PARTIALLY_COMPLETED": {"bg": "rgba(245, 158, 11, 0.2)", "text": "#fcd34d", "border": "#f59e0b"},
+    }
+    style = colors.get(ev, {"bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"})
+    return (
+        f'<span style="background-color: {style["bg"]}; color: {style["text"]}; '
+        f'border: 1px solid {style["border"]}; padding: 3px 8px; border-radius: 6px; '
+        f'font-weight: 700; font-size: 0.72rem; letter-spacing: 0.03em;">{ev}</span>'
+    )
+
+
+def render_live_progress_bar(
+    percentage: float,
+    completed: int,
+    total: int,
+    current_category: Optional[str] = None,
+    current_test_id: Optional[str] = None,
+) -> None:
+    """Render animated SaaS progress bar with live category and test telemetry."""
+    pct = max(0.0, min(100.0, percentage))
+    cat_info = f'• Testing Category: <code>{current_category}</code>' if current_category else ""
+    test_info = f'• Test ID: <code>{current_test_id}</code>' if current_test_id else ""
+
+    st.markdown(
+        f"""
+        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-weight: 600; font-size: 0.9rem; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                    <span>⚡ Live Execution Progress</span>
+                    <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 400;">{completed} of {total} tests finished</span>
+                </div>
+                <div style="font-weight: 700; font-size: 1.1rem; color: #8b5cf6;">
+                    {pct:.1f}%
+                </div>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.06); border-radius: 9999px; height: 10px; width: 100%; overflow: hidden;">
+                <div style="background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #10b981 100%); height: 100%; width: {pct}%; transition: width 0.3s ease-in-out; border-radius: 9999px;"></div>
+            </div>
+            <div style="display: flex; gap: 12px; font-size: 0.78rem; color: #94a3b8; margin-top: 8px;">
+                <span>Active Target</span>
+                {cat_info}
+                {test_info}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+

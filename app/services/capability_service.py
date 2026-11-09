@@ -179,3 +179,4 @@ class CapabilityService:
             skipped_categories=skipped,
             recommended_preset=recommended_preset,
         )
+

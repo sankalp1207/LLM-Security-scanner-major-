@@ -10,10 +10,12 @@ from dashboard.api_client import ScannerAPIClient
 from dashboard.components import (
     connection_status_badge,
     empty_state,
+    event_type_badge,
     in_development_card,
     metric_card,
     recommendation_card,
     render_header,
+    render_live_progress_bar,
     render_stepper,
     render_top_navbar,
     scan_preset_badge,
@@ -932,14 +934,169 @@ elif page == "🚀 Security Scanner":
             st.rerun()
 
         if scan_status in ("CREATED", "QUEUED", "RUNNING"):
-            st.info(f"⏳ Scan is currently in **{scan_status}** state. Executing bounded security probes...")
-            st.progress(0.65)
-            c_poll, c_cancel = st.columns([1, 1])
-            if c_poll.button("🔄 Refresh Telemetry", use_container_width=True):
+            prog_data = api.get_scan_progress(active_scan_id)
+            if "error" in prog_data:
+                prog_data = {}
+
+            progress_pct = prog_data.get("progress_percentage", 0.0)
+            total_t = prog_data.get("total_tests") or active_scan.get("total_tests", 0)
+            completed_t = prog_data.get("completed_tests") or active_scan.get("completed_tests", 0)
+            passed_t = prog_data.get("passed_tests") or active_scan.get("passed_tests", 0)
+            failed_t = prog_data.get("failed_tests") or active_scan.get("failed_tests", 0)
+            inconcl_t = prog_data.get("inconclusive_tests") or active_scan.get("inconclusive_tests", 0)
+            errors_t = prog_data.get("execution_errors") or active_scan.get("execution_errors", 0)
+            findings_count = prog_data.get("findings_count", 0)
+            elapsed = prog_data.get("elapsed_seconds", 0.0)
+            curr_cat = prog_data.get("current_category")
+            curr_test = prog_data.get("current_test_id")
+
+            # Cancellation & Control Strip
+            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([2, 1, 1])
+            with ctrl_c1:
+                st.markdown(
+                    f"""
+                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                        <span><strong>Status:</strong> {status_badge(scan_status)}</span>
+                        <span>•</span>
+                        <span>⏱️ <strong>Elapsed:</strong> <code>{elapsed:.1f}s</code></span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with ctrl_c2:
+                cancel_confirm = st.checkbox("Confirm Cancellation", key=f"cancel_chk_{active_scan_id}")
+            with ctrl_c3:
+                if cancel_confirm:
+                    if st.button("⏹️ Abort Scan", type="primary", use_container_width=True):
+                        api.cancel_scan(active_scan_id, reason="Cancelled by user from live monitor")
+                        st.warning("Cancellation requested.")
+                        st.rerun()
+                else:
+                    st.button("⏹️ Abort Scan", disabled=True, use_container_width=True, help="Check 'Confirm Cancellation' to enable abort")
+
+            st.caption("ℹ️ *Architecture Notice: Safe pause/resume across asynchronous in-flight requests requires durable persistent checkpointing, which is not supported by the underlying target execution architecture; hence pause/resume controls are not displayed.*")
+
+            # Visual Progress Bar
+            render_live_progress_bar(
+                percentage=progress_pct,
+                completed=completed_t,
+                total=total_t,
+                current_category=curr_cat,
+                current_test_id=curr_test,
+            )
+
+            # Real-Time Telemetry KPI Cards
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Tests Finished", f"{completed_t} / {total_t}")
+            k2.metric("Tests Passed", passed_t, delta="Passed" if passed_t > 0 else None)
+            k3.metric("Vulnerabilities", failed_t, delta="-Detected" if failed_t > 0 else "0", delta_color="inverse")
+            k4.metric("Inconclusive", inconcl_t)
+            k5.metric("Protocol Errors", errors_t, delta="Errors" if errors_t > 0 else None, delta_color="inverse")
+
+            # Live Tabs: Vulnerability Alerts, Chronological Event Feed, In-Flight Tests
+            tab_alerts, tab_events, tab_inflight = st.tabs([
+                f"🚨 Live Vulnerability Alerts ({findings_count})",
+                "⚡ Live Event Feed",
+                f"🧪 Test Telemetry Stream ({completed_t})",
+            ])
+
+            with tab_alerts:
+                findings_data = api.get_findings_for_scan(active_scan_id)
+                if not findings_data:
+                    st.info("🛡️ No vulnerabilities or policy violations detected in current probes so far.")
+                else:
+                    for f in findings_data:
+                        sev_html = severity_badge(f.get("severity", "MEDIUM"))
+                        cat_label = f.get("category", "").replace("_", " ").title()
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <span style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">{f.get('title', 'Vulnerability Finding')}</span>
+                                    {sev_html}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px;">
+                                    Category: <code>{cat_label}</code> | Affected Test Case: <code>{f.get('affected_test_case', '')}</code>
+                                </div>
+                                <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 6px;">{f.get('description', '')}</div>
+                                <div style="font-size: 0.8rem; color: #a78bfa; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px;">
+                                    💡 <strong>Remediation:</strong> {f.get('remediation', '')}
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+            with tab_events:
+                events_resp = api.get_scan_events(active_scan_id, since_seq=0, limit=200)
+                event_items = events_resp.get("events", []) if isinstance(events_resp, dict) else []
+
+                ev_f1, ev_f2 = st.columns([1, 2])
+                with ev_f1:
+                    ev_filter = st.selectbox(
+                        "Event Type Filter",
+                        options=["ALL", "TESTS", "FINDINGS", "LIFECYCLE"],
+                        key=f"ev_filter_{active_scan_id}",
+                    )
+
+                filtered_events = event_items
+                if ev_filter == "TESTS":
+                    filtered_events = [e for e in event_items if "TEST" in e.get("event_type", "")]
+                elif ev_filter == "FINDINGS":
+                    filtered_events = [e for e in event_items if "FINDING" in e.get("event_type", "")]
+                elif ev_filter == "LIFECYCLE":
+                    filtered_events = [e for e in event_items if "TEST" not in e.get("event_type", "") and "FINDING" not in e.get("event_type", "")]
+
+                if not filtered_events:
+                    st.caption("No events matching selected filter.")
+                else:
+                    for ev in reversed(filtered_events[-50:]):
+                        ev_badge = event_type_badge(ev.get("event_type", "UNKNOWN"))
+                        seq = ev.get("sequence", 0)
+                        ts = ev.get("timestamp", "")[11:19]
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(17, 24, 39, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="color: #64748b; font-family: monospace;">#{seq:03d}</span>
+                                    <span style="color: #94a3b8; font-family: monospace;">{ts}</span>
+                                    {ev_badge}
+                                </div>
+                                <div style="color: #cbd5e1; font-size: 0.78rem; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    <code>{json.dumps(ev.get('payload', {}))}</code>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+            with tab_inflight:
+                tests_resp = api.get_scan_tests(active_scan_id, limit=100)
+                tests_list = tests_resp.get("items", [])
+                if not tests_list:
+                    st.info("Awaiting initial test case executions...")
+                else:
+                    telemetry_rows = []
+                    for t_item in tests_list:
+                        telemetry_rows.append({
+                            "Test ID": t_item.get("test_case_id", ""),
+                            "Category": t_item.get("category", ""),
+                            "Outcome": t_item.get("execution_status", ""),
+                            "Latency (ms)": t_item.get("latency_ms", 0.0),
+                            "HTTP Status": t_item.get("response_status") or "Err",
+                            "Observed Preview": (t_item.get("observed_behavior") or "")[:80] + "...",
+                        })
+                    st.dataframe(pd.DataFrame(telemetry_rows), use_container_width=True)
+
+            # Auto-refresh / live streaming toggle
+            st.divider()
+            col_ref1, col_ref2 = st.columns([1, 3])
+            auto_refresh = col_ref1.checkbox("⚡ Live Telemetry Polling (2s)", value=True, key=f"auto_ref_{active_scan_id}")
+            if col_ref2.button("🔄 Manual Refresh Now", use_container_width=False):
                 st.rerun()
-            if c_cancel.button("⏹️ Cancel Active Scan", use_container_width=True):
-                c_res = api.cancel_scan(active_scan_id)
-                st.warning("Cancellation requested.")
+
+            if auto_refresh:
+                time.sleep(2)
                 st.rerun()
         else:
             # Completed Scan Summary Metrics
@@ -963,10 +1120,11 @@ elif page == "🚀 Security Scanner":
             elif active_scan.get("failure_reason"):
                 st.error(f"Scan failed: **{active_scan['failure_reason']}**")
 
-            # Result Tabs: Findings, Individual Test Telemetry, Config Snapshot
-            tab_findings, tab_telemetry, tab_config = st.tabs([
+            # Result Tabs: Findings, Individual Test Telemetry, Event Audit Trail, Config Snapshot
+            tab_findings, tab_telemetry, tab_audit_events, tab_config = st.tabs([
                 f"🚨 Confirmed Findings ({findings_count})",
                 f"🧪 Individual Test Telemetry ({total_t})",
+                "📜 Event Audit Trail",
                 "⚙️ Scan Configuration Snapshot",
             ])
 
@@ -1018,6 +1176,33 @@ elif page == "🚀 Security Scanner":
                             "Observed Preview": (t_item.get("observed_behavior") or "")[:80] + "...",
                         })
                     st.dataframe(pd.DataFrame(telemetry_rows), use_container_width=True)
+
+            with tab_audit_events:
+                events_resp = api.get_scan_events(active_scan_id, since_seq=0, limit=300)
+                event_items = events_resp.get("events", []) if isinstance(events_resp, dict) else []
+                if not event_items:
+                    st.info("No recorded lifecycle events found for this scan.")
+                else:
+                    st.caption(f"Chronological event audit trail ({len(event_items)} events captured).")
+                    for ev in event_items:
+                        ev_badge = event_type_badge(ev.get("event_type", "UNKNOWN"))
+                        seq = ev.get("sequence", 0)
+                        ts = ev.get("timestamp", "")[11:19]
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(17, 24, 39, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="color: #64748b; font-family: monospace;">#{seq:03d}</span>
+                                    <span style="color: #94a3b8; font-family: monospace;">{ts}</span>
+                                    {ev_badge}
+                                </div>
+                                <div style="color: #cbd5e1; font-size: 0.78rem; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    <code>{json.dumps(ev.get('payload', {}))}</code>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
             with tab_config:
                 st.markdown("#### Configuration Snapshot at Execution")
@@ -1641,6 +1826,31 @@ elif page == "📜 Security History":
                         st.dataframe(pd.DataFrame(t_rows), use_container_width=True)
                     else:
                         st.info("No test execution records recorded for this scan.")
+
+                    # Event audit trail for selected scan
+                    events_h = api.get_scan_events(inspect_scan_id, since_seq=0, limit=100)
+                    e_items = events_h.get("events", []) if isinstance(events_h, dict) else []
+                    if e_items:
+                        with st.expander(f"📜 Lifecycle Event Audit Trail ({len(e_items)} events)"):
+                            for ev in e_items:
+                                ev_badge = event_type_badge(ev.get("event_type", "UNKNOWN"))
+                                seq = ev.get("sequence", 0)
+                                ts = ev.get("timestamp", "")[11:19]
+                                st.markdown(
+                                    f"""
+                                    <div style="background: rgba(17, 24, 39, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 6px 10px; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem;">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <span style="color: #64748b; font-family: monospace;">#{seq:03d}</span>
+                                            <span style="color: #94a3b8; font-family: monospace;">{ts}</span>
+                                            {ev_badge}
+                                        </div>
+                                        <div style="color: #cbd5e1; font-size: 0.75rem; max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            <code>{json.dumps(ev.get('payload', {}))}</code>
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
         else:
             st.info("No scans match the selected filter criteria.")
 

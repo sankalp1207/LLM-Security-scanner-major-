@@ -3,9 +3,11 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.schemas.events import ScanEventListResponse, ScanProgressResponse
 from app.schemas.presets import ScanPresetConfig, list_presets
 from app.schemas.scans import (
     FindingResponse,
@@ -15,6 +17,7 @@ from app.schemas.scans import (
     ScanResponse,
     TestExecutionListResponse,
 )
+from app.services.event_service import ScanEventService
 from app.services.scan_service import ScanService
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
@@ -241,3 +244,62 @@ def cancel_scan(
         cancellation_reason=scan.cancellation_reason,
         failure_reason=scan.failure_reason,
     )
+
+
+# -----------------------------------------------------------------------------
+# REAL-TIME MONITORING, SSE STREAMING & PROGRESS SNAPSHOTS
+# -----------------------------------------------------------------------------
+@router.get("/{scan_id}/progress", response_model=ScanProgressResponse)
+def get_scan_progress(
+    scan_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ScanProgressResponse:
+    """Retrieve real-time execution progress snapshot derived directly from backend state."""
+    ScanService.get_scan(db, scan_id, user_id=user_id)
+    return ScanEventService.get_progress_snapshot(db=db, scan_id=scan_id)
+
+
+@router.get("/{scan_id}/events", response_model=ScanEventListResponse)
+def get_scan_events(
+    scan_id: str,
+    since_seq: int = Query(0, ge=0, description="Replay events with sequence number strictly greater than this value"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum events to return"),
+    event_type: Optional[str] = Query(None, description="Optional event type filter"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ScanEventListResponse:
+    """Fetch chronological scan events with cursor-based pagination for history and reconnection replay."""
+    ScanService.get_scan(db, scan_id, user_id=user_id)
+    return ScanEventService.get_events_for_scan(
+        db=db,
+        scan_id=scan_id,
+        since_seq=since_seq,
+        limit=limit,
+        event_type=event_type,
+    )
+
+
+@router.get("/{scan_id}/live")
+async def stream_scan_events(
+    scan_id: str,
+    since_seq: int = Query(0, ge=0, description="Replay missed events strictly greater than this cursor before live streaming"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """
+    Stream live Server-Sent Events (SSE) for real-time scan telemetry.
+    Supports reconnection and gap recovery via since_seq cursor.
+    """
+    ScanService.get_scan(db, scan_id, user_id=user_id)
+
+    return StreamingResponse(
+        ScanEventService.subscribe(scan_id=scan_id, since_seq=since_seq),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+

@@ -1,7 +1,8 @@
 """Bounded concurrent test runner executing security test cases against a target."""
 
 import asyncio
-from typing import Callable, List, Optional
+import inspect
+from typing import Any, Callable, List, Optional
 
 import httpx
 
@@ -29,8 +30,11 @@ class TestRunner:
         self,
         test_cases: List[TestCaseRecord],
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        on_test_start: Optional[Callable[[TestCaseRecord], Any]] = None,
+        on_test_complete: Optional[Callable[[TestCaseRecord, ExecutionResult], Any]] = None,
+        is_cancelled: Optional[Callable[[], bool]] = None,
     ) -> List[ExecutionResult]:
-        """Execute test cases with bounded concurrency."""
+        """Execute test cases with bounded concurrency, lifecycle callbacks, and cancellation awareness."""
         semaphore = asyncio.Semaphore(self.max_concurrency)
         results: List[ExecutionResult] = []
         completed_count = 0
@@ -42,9 +46,24 @@ class TestRunner:
         )
         should_close = self.http_client is None
 
-        async def _run_single(tc: TestCaseRecord) -> ExecutionResult:
+        async def _run_single(tc: TestCaseRecord) -> Optional[ExecutionResult]:
             nonlocal completed_count
+            if is_cancelled and is_cancelled():
+                return None
+
             async with semaphore:
+                if is_cancelled and is_cancelled():
+                    return None
+
+                if on_test_start:
+                    try:
+                        if inspect.iscoroutinefunction(on_test_start):
+                            await on_test_start(tc)
+                        else:
+                            on_test_start(tc)
+                    except Exception:
+                        pass
+
                 res = await TargetClient.execute_test(
                     target_url=self.target_url,
                     test_case_id=tc.id,
@@ -54,15 +73,30 @@ class TestRunner:
                     client=client,
                     metadata=tc.metadata,
                 )
+
                 completed_count += 1
                 if progress_callback:
-                    progress_callback(completed_count, total_count)
+                    try:
+                        progress_callback(completed_count, total_count)
+                    except Exception:
+                        pass
+
+                if on_test_complete:
+                    try:
+                        if inspect.iscoroutinefunction(on_test_complete):
+                            await on_test_complete(tc, res)
+                        else:
+                            on_test_complete(tc, res)
+                    except Exception:
+                        pass
+
                 return res
 
         try:
             tasks = [_run_single(tc) for tc in test_cases]
-            results = await asyncio.gather(*tasks)
-            return list(results)
+            raw_results = await asyncio.gather(*tasks)
+            # Filter out any cancelled items
+            return [r for r in raw_results if r is not None]
         finally:
             if should_close:
                 await client.aclose()
