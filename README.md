@@ -20,7 +20,7 @@ An end-to-end, reproducible security auditing and automated red-teaming platform
 * **Input De-obfuscation Normalizer**: Defense-in-depth pipeline unmasking encoded and obfuscated prompts before threat classification and guardrail enforcement.
 * **Automated Red-Team Scanner**: Structured, rate-limited, non-destructive security test runner executing against authorized LLM endpoints.
 * **Runtime Guardrails**: Defensive pre-execution and post-generation filtering policies demonstrating attack mitigation.
-* **Interactive Security Dashboard**: Streamlit-based interface for scan management, real-time telemetry, vulnerability evidence review, and report export.
+* **Premium AI Cybersecurity SaaS Platform (Phase 1 UI/UX)**: Enterprise-grade dark charcoal operations console featuring dynamic Security Posture Scoring, Vulnerability Trends analytics, interactive multi-stage Attack Graph, and expandable finding exploration with 1-click mitigation retesting.
 * **Comprehensive Reporting**: Multi-format reporting (JSON, CSV with spreadsheet formula injection protection).
 
 ---

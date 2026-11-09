@@ -53,6 +53,32 @@ class ScannerAPIClient:
                 return res.json()
             return {"error": res.json().get("detail", res.text)}
 
+    def list_all_findings(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        retest_status: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch all findings across scans with optional filters."""
+        params: Dict[str, Any] = {"skip": skip, "limit": limit}
+        if category:
+            params["category"] = category
+        if severity:
+            params["severity"] = severity
+        if retest_status:
+            params["retest_status"] = retest_status
+
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/findings", params=params)
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return []
+
     def get_findings(
         self,
         scan_id: str,

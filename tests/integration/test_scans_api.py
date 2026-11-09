@@ -51,3 +51,16 @@ def test_list_scans_pagination(client: TestClient):
     assert "total" in data
     assert "items" in data
     assert isinstance(data["items"], list)
+
+
+def test_list_all_findings_endpoint(client: TestClient):
+    """Verify listing findings across all scans with optional filtering."""
+    response = client.get("/api/v1/findings?skip=0&limit=20")
+    assert response.status_code == 200
+    findings = response.json()
+    assert isinstance(findings, list)
+
+    # Test with filters
+    response_filt = client.get("/api/v1/findings?severity=CRITICAL&limit=5")
+    assert response_filt.status_code == 200
+    assert isinstance(response_filt.json(), list)

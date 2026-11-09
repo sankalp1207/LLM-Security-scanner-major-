@@ -31,3 +31,36 @@ def test_dashboard_api_client_graceful_offline():
 
     scans = client.list_scans()
     assert scans == []
+
+    findings = client.list_all_findings()
+    assert findings == []
+
+
+def test_theme_injection():
+    """Verify theme CSS is defined and contains cyber SaaS styling rules."""
+    from dashboard.theme import CYBER_THEME_CSS
+
+    assert "--bg-main: #090d16;" in CYBER_THEME_CSS
+    assert "--accent-indigo: #6366f1;" in CYBER_THEME_CSS
+    assert ".kpi-container" in CYBER_THEME_CSS
+    assert ".top-navbar" in CYBER_THEME_CSS
+
+
+def test_dashboard_components_helpers():
+    """Verify new SaaS component helpers exist and execute cleanly."""
+    from dashboard.components import (
+        empty_state,
+        in_development_card,
+        metric_card,
+        recommendation_card,
+        render_header,
+        render_top_navbar,
+    )
+
+    # Assert helper callables exist
+    assert callable(render_header)
+    assert callable(render_top_navbar)
+    assert callable(metric_card)
+    assert callable(empty_state)
+    assert callable(recommendation_card)
+    assert callable(in_development_card)

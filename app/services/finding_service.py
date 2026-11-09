@@ -1,7 +1,7 @@
 """Service managing vulnerability finding review, details, and remediation retesting."""
 
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +15,25 @@ from app.scanner.target_client import TargetClient
 
 class FindingService:
     """Business logic for finding inspection and remediation retesting."""
+
+    @staticmethod
+    def list_findings(
+        db: Session,
+        skip: int = 0,
+        limit: int = 50,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        retest_status: Optional[str] = None,
+    ) -> list[Finding]:
+        """Retrieve paginated findings across all scans with optional filters."""
+        return FindingRepository.list_all_findings(
+            db=db,
+            skip=skip,
+            limit=limit,
+            category=category,
+            severity=severity,
+            retest_status=retest_status,
+        )
 
     @staticmethod
     def get_finding(db: Session, finding_id: str) -> Finding:

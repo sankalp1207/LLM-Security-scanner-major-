@@ -186,6 +186,42 @@ class FindingRepository:
         rows = query.group_by(Finding.category).all()
         return {row[0]: row[1] for row in rows}
 
+    @staticmethod
+    def list_all_findings(
+        db: Session,
+        skip: int = 0,
+        limit: int = 50,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        retest_status: Optional[str] = None,
+    ) -> List[Finding]:
+        """List findings across all scans with optional category, severity, and retest filters."""
+        query = db.query(Finding)
+        if category:
+            query = query.filter(Finding.category == category)
+        if severity:
+            query = query.filter(Finding.severity == severity)
+        if retest_status:
+            query = query.filter(Finding.retest_status == retest_status)
+        return query.order_by(Finding.creation_timestamp.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def count_all_findings(
+        db: Session,
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+        retest_status: Optional[str] = None,
+    ) -> int:
+        """Count findings across all scans with optional filters."""
+        query = db.query(func.count(Finding.id))
+        if category:
+            query = query.filter(Finding.category == category)
+        if severity:
+            query = query.filter(Finding.severity == severity)
+        if retest_status:
+            query = query.filter(Finding.retest_status == retest_status)
+        return query.scalar() or 0
+
 
 class TestCaseRepository:
     """Repository managing SecurityTestCase persistence, versioning, and lifecycle."""
