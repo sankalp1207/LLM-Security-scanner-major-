@@ -41,9 +41,11 @@ class Scan(Base):
     completion_timestamp = Column(DateTime(timezone=True), nullable=True)
     summary = Column(JSON, default=dict, nullable=False)
     scanner_version = Column(String(32), default="1.0.0", nullable=False)
+    project_id = Column(String(64), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Relationships
     findings = relationship("Finding", back_populates="scan", cascade="all, delete-orphan")
+    project = relationship("Project", back_populates="scans")
 
 
 class Finding(Base):
@@ -151,3 +153,96 @@ class ModelEvaluation(Base):
     confusion_matrix = Column(JSON, default=dict, nullable=False)
     per_class_metrics = Column(JSON, default=dict, nullable=False)
     configuration = Column(JSON, default=dict, nullable=False)
+
+
+class Project(Base):
+    """Database model for enterprise security assessment projects."""
+
+    __tablename__ = "projects"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    owner_id = Column(String(64), default="default_user", nullable=False, index=True)
+    name = Column(String(128), nullable=False, index=True)
+    description = Column(Text, default="", nullable=False)
+    application_type = Column(String(64), default="rag", nullable=False)
+    environment = Column(String(32), default="development", nullable=False)
+    target_type = Column(String(32), default="demo", nullable=False)
+    default_scan_preferences = Column(JSON, default=dict, nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False, index=True)
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relationships
+    target_configuration = relationship(
+        "TargetConfiguration",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    scans = relationship("Scan", back_populates="project")
+
+
+class TargetConfiguration(Base):
+    """Database model for project destination and LLM target connection parameters."""
+
+    __tablename__ = "target_configurations"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    project_id = Column(String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(64), default="demo", nullable=False)
+    endpoint_url = Column(String(512), nullable=False)
+    model_identifier = Column(String(128), default="", nullable=False)
+    auth_type = Column(String(32), default="none", nullable=False)
+    encrypted_credential = Column(Text, default="", nullable=False)
+    connection_timeout = Column(Float, default=10.0, nullable=False)
+    connection_status = Column(String(32), default="UNVERIFIED", nullable=False)
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
+    verification_details = Column(JSON, default=dict, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="target_configuration")
+
+
+class UserOnboarding(Base):
+    """Database model for persisting onboarding completion per user."""
+
+    __tablename__ = "user_onboardings"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    user_id = Column(String(64), unique=True, nullable=False, index=True)
+    is_completed = Column(Boolean, default=False, nullable=False)
+    selected_demo = Column(Boolean, default=False, nullable=False)
+    active_project_id = Column(String(64), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

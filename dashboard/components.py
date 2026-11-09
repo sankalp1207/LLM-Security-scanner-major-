@@ -198,3 +198,71 @@ def in_development_card(
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_stepper(
+    current_step: int,
+    total_steps: int = 6,
+    step_labels: Optional[List[str]] = None,
+) -> None:
+    """Render a visual step-by-step progress indicator for onboarding."""
+    labels = step_labels or [
+        "1. Project Scope",
+        "2. Target Type",
+        "3. Target Config",
+        "4. Preferences",
+        "5. Verification",
+        "6. Complete",
+    ]
+
+    steps_html = []
+    for i, label in enumerate(labels, 1):
+        if i < current_step:
+            circle = '<span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold;">✓</span>'
+            color = "#10b981"
+            weight = "600"
+        elif i == current_step:
+            circle = f'<span style="background: #6366f1; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; box-shadow: 0 0 10px rgba(99,102,241,0.6);">{i}</span>'
+            color = "#ffffff"
+            weight = "700"
+        else:
+            circle = f'<span style="background: rgba(255,255,255,0.06); color: #64748b; border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem;">{i}</span>'
+            color = "#64748b"
+            weight = "400"
+
+        steps_html.append(
+            f'<div style="display: flex; align-items: center; gap: 6px; color: {color}; font-size: 0.8rem; font-weight: {weight};">'
+            f'{circle} <span>{label}</span>'
+            f'</div>'
+        )
+
+    stepper_body = ' <span style="color: rgba(255,255,255,0.15); margin: 0 4px;">─►</span> '.join(steps_html)
+
+    st.markdown(
+        f"""
+        <div style="background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 12px 18px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; overflow-x: auto;">
+            {stepper_body}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def connection_status_badge(status: str) -> str:
+    """Return colored HTML badge for target connection status."""
+    st_val = str(status).upper()
+    colors = {
+        "CONNECTED": {"bg": "rgba(16, 185, 129, 0.15)", "text": "#6ee7b7", "border": "#10b981"},
+        "AUTH_FAILED": {"bg": "rgba(239, 68, 68, 0.15)", "text": "#fca5a5", "border": "#ef4444"},
+        "UNAVAILABLE": {"bg": "rgba(245, 158, 11, 0.15)", "text": "#fcd34d", "border": "#f59e0b"},
+        "TIMEOUT": {"bg": "rgba(249, 115, 22, 0.15)", "text": "#fdba74", "border": "#f97316"},
+        "BLOCKED": {"bg": "rgba(239, 68, 68, 0.2)", "text": "#f87171", "border": "#dc2626"},
+        "UNVERIFIED": {"bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"},
+    }
+    style = colors.get(st_val, {"bg": "rgba(100, 116, 139, 0.15)", "text": "#cbd5e1", "border": "#64748b"})
+    return (
+        f'<span style="background-color: {style["bg"]}; color: {style["text"]}; '
+        f'border: 1px solid {style["border"]}; padding: 3px 10px; border-radius: 9999px; '
+        f'font-weight: 600; font-size: 0.75rem; text-transform: uppercase;">{st_val}</span>'
+    )
+

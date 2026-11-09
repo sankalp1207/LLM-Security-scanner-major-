@@ -5,7 +5,14 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings, get_settings
+from app.database.connection import init_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def setup_test_db():
+    """Ensure all database models and tables are initialized for testing."""
+    init_db()
 
 
 @pytest.fixture

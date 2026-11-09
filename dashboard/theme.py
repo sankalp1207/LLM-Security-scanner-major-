@@ -471,3 +471,4 @@ def inject_custom_theme() -> None:
     """Inject premium cybersecurity SaaS styling into Streamlit DOM."""
     import streamlit as st
     st.markdown(CYBER_THEME_CSS, unsafe_allow_html=True)
+

@@ -37,6 +37,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """Initialize database tables according to SQLAlchemy metadata and apply auto-migrations."""
+    import app.database.models  # noqa: F401 - ensure models are registered on Base metadata
     Base.metadata.create_all(bind=engine)
 
     # Auto-migration for SQLite schema evolution
@@ -62,6 +63,13 @@ def init_db() -> None:
                     for col_name, col_type in new_cols.items():
                         if col_name not in cols:
                             conn.exec_driver_sql(f"ALTER TABLE security_test_cases ADD COLUMN {col_name} {col_type}")
-                    conn.commit()
+
+                # Ensure project_id on scans table
+                scan_res = conn.exec_driver_sql("PRAGMA table_info(scans)")
+                scan_cols = {row[1] for row in scan_res.fetchall()}
+                if scan_cols and "project_id" not in scan_cols:
+                    conn.exec_driver_sql("ALTER TABLE scans ADD COLUMN project_id VARCHAR(64)")
+
+                conn.commit()
             except Exception:
                 pass

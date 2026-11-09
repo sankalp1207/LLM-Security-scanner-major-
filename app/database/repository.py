@@ -9,9 +9,12 @@ from sqlalchemy.orm import Session
 from app.database.models import (
     Finding,
     ModelEvaluation,
+    Project,
     Scan,
     SecurityTestCase,
+    TargetConfiguration,
     TestSuiteVersion,
+    UserOnboarding,
 )
 
 
@@ -475,3 +478,287 @@ class EvaluationRepository:
             .order_by(ModelEvaluation.evaluation_timestamp.desc())
             .first()
         )
+
+
+class ProjectRepository:
+    """Repository managing Project lifecycle, configuration, and ownership isolation."""
+
+    @staticmethod
+    def create_project(
+        db: Session,
+        name: str,
+        owner_id: str = "default_user",
+        description: str = "",
+        application_type: str = "rag",
+        environment: str = "development",
+        target_type: str = "demo",
+        default_scan_preferences: Optional[dict] = None,
+        onboarding_completed: bool = False,
+    ) -> Project:
+        """Create and persist a new Project record."""
+        project = Project(
+            owner_id=owner_id,
+            name=name,
+            description=description,
+            application_type=application_type,
+            environment=environment,
+            target_type=target_type,
+            default_scan_preferences=default_scan_preferences or {
+                "direct_prompt_injection": True,
+                "indirect_prompt_injection": True,
+                "jailbreak_testing": True,
+                "sensitive_data_leakage": True,
+                "rag_security": True,
+                "agent_security": False,
+                "input_validation": True,
+                "output_validation": True,
+                "scan_preference": "full",
+                "adversarial_mutation_fuzzing": True,
+            },
+            onboarding_completed=onboarding_completed,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+        return project
+
+    @staticmethod
+    def get_project(
+        db: Session,
+        project_id: str,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Project]:
+        """Retrieve project by ID, optionally scoped to owner."""
+        query = db.query(Project).filter(Project.id == project_id)
+        if owner_id:
+            query = query.filter(Project.owner_id == owner_id)
+        return query.first()
+
+    @staticmethod
+    def get_project_by_name(
+        db: Session,
+        name: str,
+        owner_id: str = "default_user",
+    ) -> Optional[Project]:
+        """Check duplicate project name within the same owner scope."""
+        return (
+            db.query(Project)
+            .filter(Project.owner_id == owner_id, Project.name == name)
+            .first()
+        )
+
+    @staticmethod
+    def list_projects(
+        db: Session,
+        owner_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+        include_archived: bool = False,
+    ) -> List[Project]:
+        """List projects with pagination, ordering, and optional owner filtering."""
+        query = db.query(Project)
+        if owner_id:
+            query = query.filter(Project.owner_id == owner_id)
+        if not include_archived:
+            query = query.filter(Project.is_archived.is_(False))
+        return (
+            query.order_by(Project.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def count_projects(
+        db: Session,
+        owner_id: Optional[str] = None,
+        include_archived: bool = False,
+    ) -> int:
+        """Count total projects under the specified criteria."""
+        query = db.query(func.count(Project.id))
+        if owner_id:
+            query = query.filter(Project.owner_id == owner_id)
+        if not include_archived:
+            query = query.filter(Project.is_archived.is_(False))
+        return query.scalar() or 0
+
+    @staticmethod
+    def update_project(
+        db: Session,
+        project_id: str,
+        updates: dict,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Project]:
+        """Update fields on an existing project."""
+        project = ProjectRepository.get_project(db, project_id, owner_id=owner_id)
+        if not project:
+            return None
+        for key, val in updates.items():
+            if val is not None and hasattr(project, key):
+                setattr(project, key, val)
+        project.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(project)
+        return project
+
+    @staticmethod
+    def delete_project(
+        db: Session,
+        project_id: str,
+        owner_id: Optional[str] = None,
+    ) -> bool:
+        """Safely delete project and associated target configuration."""
+        project = ProjectRepository.get_project(db, project_id, owner_id=owner_id)
+        if not project:
+            return False
+        db.delete(project)
+        db.commit()
+        return True
+
+
+class TargetConfigurationRepository:
+    """Repository managing target endpoint parameters and encrypted credentials."""
+
+    @staticmethod
+    def upsert_configuration(
+        db: Session,
+        project_id: str,
+        provider: str = "demo",
+        endpoint_url: str = "http://127.0.0.1:8000/api/v1/demo-rag/query",
+        model_identifier: str = "",
+        auth_type: str = "none",
+        encrypted_credential: str = "",
+        connection_timeout: float = 10.0,
+    ) -> TargetConfiguration:
+        """Create or update target connection configuration for a project."""
+        config = (
+            db.query(TargetConfiguration)
+            .filter(TargetConfiguration.project_id == project_id)
+            .first()
+        )
+        now = datetime.now(timezone.utc)
+        if config:
+            config.provider = provider
+            config.endpoint_url = endpoint_url
+            config.model_identifier = model_identifier
+            config.auth_type = auth_type
+            if encrypted_credential:
+                config.encrypted_credential = encrypted_credential
+            config.connection_timeout = connection_timeout
+            config.updated_at = now
+        else:
+            config = TargetConfiguration(
+                project_id=project_id,
+                provider=provider,
+                endpoint_url=endpoint_url,
+                model_identifier=model_identifier,
+                auth_type=auth_type,
+                encrypted_credential=encrypted_credential,
+                connection_timeout=connection_timeout,
+                connection_status="UNVERIFIED",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(config)
+        db.commit()
+        db.refresh(config)
+        return config
+
+    @staticmethod
+    def get_configuration(db: Session, project_id: str) -> Optional[TargetConfiguration]:
+        """Fetch target configuration for a given project."""
+        return (
+            db.query(TargetConfiguration)
+            .filter(TargetConfiguration.project_id == project_id)
+            .first()
+        )
+
+    @staticmethod
+    def update_verification_status(
+        db: Session,
+        project_id: str,
+        status: str,
+        details: Optional[dict] = None,
+    ) -> Optional[TargetConfiguration]:
+        """Update live connection verification result."""
+        config = TargetConfigurationRepository.get_configuration(db, project_id)
+        if not config:
+            return None
+        config.connection_status = status
+        config.last_verified_at = datetime.now(timezone.utc)
+        if details is not None:
+            config.verification_details = details
+        config.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(config)
+        return config
+
+
+class UserOnboardingRepository:
+    """Repository persisting first-time onboarding and demo exploration state per user."""
+
+    @staticmethod
+    def get_status(db: Session, user_id: str = "default_user") -> Optional[UserOnboarding]:
+        """Retrieve onboarding record for user."""
+        return (
+            db.query(UserOnboarding)
+            .filter(UserOnboarding.user_id == user_id)
+            .first()
+        )
+
+    @staticmethod
+    def complete_onboarding(
+        db: Session,
+        user_id: str = "default_user",
+        selected_demo: bool = False,
+        active_project_id: Optional[str] = None,
+    ) -> UserOnboarding:
+        """Mark onboarding as completed for user."""
+        record = UserOnboardingRepository.get_status(db, user_id)
+        now = datetime.now(timezone.utc)
+        if record:
+            record.is_completed = True
+            record.selected_demo = selected_demo
+            if active_project_id:
+                record.active_project_id = active_project_id
+            record.completed_at = now
+            record.updated_at = now
+        else:
+            record = UserOnboarding(
+                user_id=user_id,
+                is_completed=True,
+                selected_demo=selected_demo,
+                active_project_id=active_project_id,
+                completed_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
+    def reset_onboarding(db: Session, user_id: str = "default_user") -> UserOnboarding:
+        """Reset onboarding state to allow revisiting the setup wizard from settings."""
+        record = UserOnboardingRepository.get_status(db, user_id)
+        now = datetime.now(timezone.utc)
+        if record:
+            record.is_completed = False
+            record.completed_at = None
+            record.updated_at = now
+        else:
+            record = UserOnboarding(
+                user_id=user_id,
+                is_completed=False,
+                selected_demo=False,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+

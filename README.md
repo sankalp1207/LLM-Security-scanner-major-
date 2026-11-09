@@ -20,6 +20,10 @@ An end-to-end, reproducible security auditing and automated red-teaming platform
 * **Input De-obfuscation Normalizer**: Defense-in-depth pipeline unmasking encoded and obfuscated prompts before threat classification and guardrail enforcement.
 * **Automated Red-Team Scanner**: Structured, rate-limited, non-destructive security test runner executing against authorized LLM endpoints.
 * **Runtime Guardrails**: Defensive pre-execution and post-generation filtering policies demonstrating attack mitigation.
+* **Interactive First-Time Onboarding & Setup Wizard (Phase 2)**: Smooth guided onboarding experience featuring a welcome screen with capability highlights, instant one-click demonstration setup, and an intuitive 6-step project creation wizard.
+* **Multi-Project Management & Scope Isolation (Phase 2)**: Scoped multi-project workspace support across application types (Chatbot, RAG, AI Agent, LLM API, Custom LLM) and deployment environments (Dev, Test, Staging, Prod) with granular security test profiles.
+* **Safe Target Diagnostics & SSRF Defense (Phase 2)**: Non-adversarial diagnostic target verification blocking cloud metadata endpoints (`169.254.169.254`), private IP ranges, and unauthorized loopback destinations with actionable remediation guides.
+* **Encrypted Credential Storage (Phase 2)**: Enterprise-grade Fernet symmetric encryption at rest with SHA-256 key derivation. Sensitive credentials are masked in all API responses and UI displays (`sk-••••••••1234`) and never exposed in server logs.
 * **Premium AI Cybersecurity SaaS Platform (Phase 1 UI/UX)**: Enterprise-grade dark charcoal operations console featuring dynamic Security Posture Scoring, Vulnerability Trends analytics, interactive multi-stage Attack Graph, and expandable finding exploration with 1-click mitigation retesting.
 * **Comprehensive Reporting**: Multi-format reporting (JSON, CSV with spreadsheet formula injection protection).
 

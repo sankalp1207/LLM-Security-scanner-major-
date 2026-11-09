@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # Persistence
     DATABASE_URL: str = "sqlite:///./llm_security_scanner.db"
+    ENCRYPTION_KEY: str = ""
 
     # Scanner Guardrails & Limits
     SCANNER_REQUEST_TIMEOUT_SECONDS: float = 10.0

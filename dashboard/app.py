@@ -2,16 +2,19 @@
 
 from datetime import datetime, timezone
 import json
+import time
 import pandas as pd
 import streamlit as st
 
 from dashboard.api_client import ScannerAPIClient
 from dashboard.components import (
+    connection_status_badge,
     empty_state,
     in_development_card,
     metric_card,
     recommendation_card,
     render_header,
+    render_stepper,
     render_top_navbar,
     severity_badge,
     status_badge,
@@ -36,6 +39,46 @@ api = ScannerAPIClient()
 health = api.check_health()
 backend_online = health.get("status") == "healthy"
 backend_version = health.get("version", "v1.0.0")
+
+# -----------------------------------------------------------------------------
+# ACTIVE PROJECT & ONBOARDING STATE MANAGEMENT
+# -----------------------------------------------------------------------------
+onboarding_state = api.get_onboarding_status()
+user_projects = api.list_projects() if backend_online else []
+
+# Track active project in session state
+if "active_project_id" not in st.session_state:
+    if user_projects:
+        st.session_state["active_project_id"] = user_projects[0]["id"]
+    else:
+        st.session_state["active_project_id"] = None
+
+# Resolve active project name
+active_project_name = "Default Project"
+active_project_data = None
+if st.session_state.get("active_project_id") and user_projects:
+    for p in user_projects:
+        if p["id"] == st.session_state["active_project_id"]:
+            active_project_name = p["name"]
+            active_project_data = p
+            break
+elif user_projects:
+    active_project_name = user_projects[0]["name"]
+    active_project_data = user_projects[0]
+else:
+    active_project_name = "ACME Enterprise RAG"
+
+# Check if first-time onboarding should be presented
+show_onboarding = False
+if backend_online:
+    is_completed = onboarding_state.get("is_completed", False)
+    has_projs = len(user_projects) > 0 or onboarding_state.get("has_projects", False)
+    if not is_completed and not has_projs and not st.session_state.get("dismiss_onboarding", False):
+        show_onboarding = True
+
+# Allow manual trigger to enter wizard
+if st.session_state.get("in_setup_wizard", False):
+    show_onboarding = True
 
 # -----------------------------------------------------------------------------
 # SIDEBAR NAVIGATION
@@ -79,6 +122,21 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
+    # Active Project Quick Switcher in Sidebar
+    if user_projects:
+        st.markdown("<div style='font-size: 0.75rem; font-weight: 600; color: #94a3b8; margin-bottom: 4px;'>ACTIVE WORKSPACE</div>", unsafe_allow_html=True)
+        proj_dict = {p["name"]: p["id"] for p in user_projects}
+        curr_idx = list(proj_dict.values()).index(st.session_state["active_project_id"]) if st.session_state.get("active_project_id") in proj_dict.values() else 0
+        selected_proj_name = st.selectbox(
+            "Active Project",
+            options=list(proj_dict.keys()),
+            index=curr_idx,
+            label_visibility="collapsed",
+        )
+        if proj_dict[selected_proj_name] != st.session_state.get("active_project_id"):
+            st.session_state["active_project_id"] = proj_dict[selected_proj_name]
+            st.rerun()
+
     st.markdown("<div style='font-size: 0.7rem; font-weight: 700; color: #64748b; letter-spacing: 0.08em; margin-top: 10px; margin-bottom: 4px;'>OVERVIEW</div>", unsafe_allow_html=True)
     page_overview = ["📊 Dashboard"]
 
@@ -118,10 +176,461 @@ with st.sidebar:
 
 # Render Global Top Navigation Bar
 render_top_navbar(
-    current_project="ACME Enterprise RAG",
+    current_project=active_project_name,
     backend_status="Online" if backend_online else "Offline",
     version=backend_version,
 )
+
+
+# =============================================================================
+# FIRST-TIME ONBOARDING EXPERIENCE & SETUP WIZARD
+# =============================================================================
+if show_onboarding and not st.session_state.get("dismiss_onboarding", False):
+    if not st.session_state.get("in_setup_wizard", False):
+        # ---------------------------------------------------------------------
+        # 1. WELCOME SCREEN
+        # ---------------------------------------------------------------------
+        render_header(
+            "Welcome to LLM Security Scanner",
+            "Secure your AI applications through intelligent security testing, vulnerability analysis, and mitigation validation.",
+            badge="Getting Started",
+        )
+
+        st.markdown(
+            """
+            <div class="sec-card" style="padding: 28px 24px; border-left: 4px solid #8b5cf6;">
+                <div style="font-size: 1.15rem; font-weight: 600; color: #ffffff; margin-bottom: 8px;">
+                    Enterprise Red Teaming & Continuous AI Threat Auditing
+                </div>
+                <div style="color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">
+                    LLM Security Scanner equips security engineers and AI architects with automated fuzzing,
+                    canary token leak detection, adversarial prompt mutation, and runtime guardrail verification.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("#### 🌟 Platform Capabilities")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            st.markdown(
+                """
+                <div class="sec-card">
+                    <div style="font-size: 1.05rem; font-weight: 600; color: #f8fafc; margin-bottom: 6px;">
+                        🔴 AI Red Team Testing
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.88rem; line-height: 1.5;">
+                        Execute automated direct prompt injection, jailbreak personas, and adversarial evasion probes (Base64, Leetspeak, Homoglyphs) against target endpoints.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                """
+                <div class="sec-card">
+                    <div style="font-size: 1.05rem; font-weight: 600; color: #f8fafc; margin-bottom: 6px;">
+                        🤖 Agent and Tool Security
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.88rem; line-height: 1.5;">
+                        Audit multi-agent communication boundaries, tool-use execution sandboxes, and indirect prompt injection carried within external context.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with col_f2:
+            st.markdown(
+                """
+                <div class="sec-card">
+                    <div style="font-size: 1.05rem; font-weight: 600; color: #f8fafc; margin-bottom: 6px;">
+                        🛡️ RAG Security Assessment
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.88rem; line-height: 1.5;">
+                        Embed and trace synthetic canary tokens across document corpora to detect secret exfiltration, private credential leaks, and poisoning traps.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                """
+                <div class="sec-card">
+                    <div style="font-size: 1.05rem; font-weight: 600; color: #f8fafc; margin-bottom: 6px;">
+                        📊 Automated Vulnerability Analysis
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.88rem; line-height: 1.5;">
+                        Dynamic security posture scoring, real-time indicator explanations, 1-click mitigation retesting, and sanitized CSV reports (CWE-1236 safe).
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+        col_act1, col_act2, col_act3 = st.columns([2, 2, 3])
+
+        with col_act1:
+            if st.button("🚀 Start Setup Wizard", use_container_width=True):
+                st.session_state["in_setup_wizard"] = True
+                st.session_state["wizard_step"] = 1
+                st.session_state["wizard_data"] = {}
+                st.rerun()
+
+        with col_act2:
+            if st.button("🛡️ Explore Built-in Demo", use_container_width=True):
+                # Auto-provision Demo Project if not exists
+                if not user_projects:
+                    demo_payload = {
+                        "name": "ACME Enterprise RAG Demo",
+                        "description": "Pre-configured synthetic RAG target with vulnerable and defended runtime guardrails.",
+                        "application_type": "rag",
+                        "environment": "development",
+                        "target_type": "demo",
+                        "target_configuration": {
+                            "provider": "demo",
+                            "endpoint_url": "http://127.0.0.1:8000/api/v1/demo-rag/query",
+                            "model_identifier": "demo-rag-v1",
+                            "auth_type": "none",
+                        },
+                    }
+                    p_res = api.create_project(demo_payload)
+                    demo_pid = p_res.get("id") if "id" in p_res else None
+                else:
+                    demo_pid = user_projects[0]["id"]
+
+                api.complete_onboarding(selected_demo=True, project_id=demo_pid)
+                st.session_state["active_project_id"] = demo_pid
+                st.session_state["dismiss_onboarding"] = True
+                st.session_state["in_setup_wizard"] = False
+                st.success("✅ Demo environment configured! Launching operations dashboard...")
+                time.sleep(0.5)
+                st.rerun()
+
+        st.stop()
+
+    else:
+        # ---------------------------------------------------------------------
+        # 2. MULTI-STEP SETUP WIZARD (6 STEPS)
+        # ---------------------------------------------------------------------
+        step = st.session_state.get("wizard_step", 1)
+        w_data = st.session_state.setdefault("wizard_data", {})
+
+        render_header(
+            "Project Onboarding & Target Setup Wizard",
+            "Configure your target application, verify connectivity, and define security evaluation boundaries.",
+            badge=f"Step {step} of 6",
+        )
+
+        render_stepper(current_step=step, total_steps=6)
+
+        # ---------------------------------------------------------------------
+        # STEP 1: CREATE PROJECT SCOPE
+        # ---------------------------------------------------------------------
+        if step == 1:
+            st.markdown("### 📋 Step 1: Define Project Scope")
+            st.write("Specify identity and deployment environment for this security testing project.")
+
+            p_name = st.text_input("Project Name *", value=w_data.get("name", ""), placeholder="e.g. Enterprise Customer Support LLM")
+            p_desc = st.text_area("Project Description", value=w_data.get("description", ""), placeholder="Application scope, business context, and deployment boundaries...")
+
+            col_s1, col_s2 = st.columns(2)
+            app_type = col_s1.selectbox(
+                "Application Architecture *",
+                ["RAG Application", "LLM Chatbot", "AI Agent", "LLM-powered API", "Custom LLM Application"],
+                index=["RAG Application", "LLM Chatbot", "AI Agent", "LLM-powered API", "Custom LLM Application"].index(w_data.get("app_type_label", "RAG Application")),
+            )
+            env = col_s2.selectbox(
+                "Environment *",
+                ["Development", "Testing", "Staging", "Production"],
+                index=["Development", "Testing", "Staging", "Production"].index(w_data.get("env_label", "Development")),
+            )
+
+            col_btn1, col_btn2 = st.columns([4, 1])
+            with col_btn2:
+                if st.button("Next: Target Type ➔", use_container_width=True):
+                    if not p_name or len(p_name.strip()) < 2:
+                        st.error("❌ Project name is required and must have at least 2 characters.")
+                    elif len(p_desc) > 1000:
+                        st.error("❌ Description cannot exceed 1000 characters.")
+                    else:
+                        w_data["name"] = p_name.strip()
+                        w_data["description"] = p_desc.strip()
+                        w_data["app_type_label"] = app_type
+                        w_data["application_type"] = app_type.lower().replace(" ", "_").replace("-", "_")
+                        w_data["env_label"] = env
+                        w_data["environment"] = env.lower()
+                        st.session_state["wizard_step"] = 2
+                        st.rerun()
+
+        # ---------------------------------------------------------------------
+        # STEP 2: SELECT TARGET TYPE
+        # ---------------------------------------------------------------------
+        elif step == 2:
+            st.markdown("### 🎯 Step 2: Select Target Endpoint Type")
+            st.write("Choose the connection mode for the LLM application you wish to evaluate.")
+
+            target_choice = st.radio(
+                "Target Options",
+                [
+                    "A. Built-in Local Demo Environment (Zero credentials required, recommended for evaluation)",
+                    "B. Local Inference Engine (Ollama, vLLM, or Local OpenAI-compatible API)",
+                    "C. External LLM Application (Authorized HTTP REST API endpoint)",
+                ],
+                index=w_data.get("target_choice_idx", 0),
+            )
+
+            if "A." in target_choice:
+                w_data["target_type"] = "demo"
+                w_data["target_choice_idx"] = 0
+                st.info("💡 **Local Demo Environment:** Uses the included synthetic RAG assistant with synthetic canaries and toggleable guardrails. Requires no third-party API keys.")
+            elif "B." in target_choice:
+                w_data["target_type"] = "local_llm"
+                w_data["target_choice_idx"] = 1
+                st.info("💡 **Local Inference Engine:** Connect to your locally hosted model via standard JSON completion or chat endpoints.")
+            else:
+                w_data["target_type"] = "external_api"
+                w_data["target_choice_idx"] = 2
+                st.warning("⚠️ **External Target:** Ensure you have explicit authorization to perform vulnerability testing against this endpoint. SSRF protections will block prohibited and internal infrastructure addresses.")
+
+            col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
+            with col_b1:
+                if st.button("⬅ Back"):
+                    st.session_state["wizard_step"] = 1
+                    st.rerun()
+            with col_b3:
+                if st.button("Next: Configure ➔", use_container_width=True):
+                    st.session_state["wizard_step"] = 3
+                    st.rerun()
+
+        # ---------------------------------------------------------------------
+        # STEP 3: TARGET CONFIGURATION
+        # ---------------------------------------------------------------------
+        elif step == 3:
+            st.markdown("### ⚙️ Step 3: Target Connection Configuration")
+            t_type = w_data.get("target_type", "demo")
+
+            if t_type == "demo":
+                st.markdown("#### Built-in Demo Target")
+                endpoint_url = st.text_input("Endpoint URL", value="http://127.0.0.1:8000/api/v1/demo-rag/query", disabled=True)
+                provider = "demo"
+                model_id = "demo-rag-v1"
+                auth_type = "none"
+                cred = ""
+                timeout = 10.0
+                st.success("✅ Demo configuration locked. No credentials required.")
+            elif t_type == "local_llm":
+                st.markdown("#### Local Inference Adapter")
+                provider = st.selectbox("Inference Provider", ["ollama", "vllm", "openai_compatible"], index=0)
+                endpoint_url = st.text_input("Local Endpoint URL", value=w_data.get("endpoint_url", "http://localhost:11434/api/generate"))
+                model_id = st.text_input("Model Identifier", value=w_data.get("model_id", "llama3:8b"))
+                auth_type = st.selectbox("Authentication Scheme", ["none", "bearer", "api_key"], index=0)
+                cred = st.text_input("API Key / Token (Optional)", value=w_data.get("credential", ""), type="password") if auth_type != "none" else ""
+                timeout = st.slider("Connection Timeout (seconds)", min_value=1.0, max_value=30.0, value=10.0)
+            else:
+                st.markdown("#### External Application Endpoint")
+                provider = "generic_http"
+                endpoint_url = st.text_input("Target Base URL / Endpoint *", value=w_data.get("endpoint_url", "https://api.example.com/v1/query"))
+                model_id = st.text_input("Deployment / Model Identifier (Optional)", value=w_data.get("model_id", "production-assistant"))
+                auth_type = st.selectbox("Authentication Scheme *", ["none", "bearer", "api_key", "basic"], index=1)
+                cred = st.text_input("API Key or Secret Token (Stored Encrypted) *", value=w_data.get("credential", ""), type="password") if auth_type != "none" else ""
+                timeout = st.slider("Connection Timeout (seconds)", min_value=1.0, max_value=30.0, value=10.0)
+                st.caption("🔒 *Credentials are encrypted with authenticated Fernet keys and never exposed via public API schemas.*")
+
+            col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
+            with col_b1:
+                if st.button("⬅ Back"):
+                    st.session_state["wizard_step"] = 2
+                    st.rerun()
+            with col_b3:
+                if st.button("Next: Preferences ➔", use_container_width=True):
+                    if not endpoint_url or not endpoint_url.strip():
+                        st.error("❌ Target endpoint URL cannot be empty.")
+                    else:
+                        w_data["endpoint_url"] = endpoint_url.strip()
+                        w_data["provider"] = provider
+                        w_data["model_id"] = model_id
+                        w_data["auth_type"] = auth_type
+                        w_data["credential"] = cred
+                        w_data["timeout"] = timeout
+                        st.session_state["wizard_step"] = 4
+                        st.rerun()
+
+        # ---------------------------------------------------------------------
+        # STEP 4: SECURITY PREFERENCES
+        # ---------------------------------------------------------------------
+        elif step == 4:
+            st.markdown("### 🛡️ Step 4: Default Security Preferences")
+            st.write("Configure baseline vulnerability testing parameters and scan horizons for this project.")
+
+            pref = w_data.setdefault("preferences", {})
+
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                pref["direct_prompt_injection"] = st.checkbox("Direct Prompt Injection Probes", value=pref.get("direct_prompt_injection", True))
+                pref["indirect_prompt_injection"] = st.checkbox("Indirect Context Poisoning Probes", value=pref.get("indirect_prompt_injection", True))
+                pref["jailbreak_testing"] = st.checkbox("Jailbreak & Persona Evasion Probes", value=pref.get("jailbreak_testing", True))
+                pref["sensitive_data_leakage"] = st.checkbox("Synthetic Secret & Canary Token Audits", value=pref.get("sensitive_data_leakage", True))
+
+            with col_p2:
+                pref["rag_security"] = st.checkbox("RAG Document Boundary Verification", value=pref.get("rag_security", True))
+                pref["agent_security"] = st.checkbox("Autonomous Agent Tool-Use Boundaries", value=pref.get("agent_security", False))
+                pref["adversarial_mutation_fuzzing"] = st.checkbox("Adversarial Mutation Fuzzing (Base64, Leetspeak, Homoglyphs)", value=pref.get("adversarial_mutation_fuzzing", True))
+                pref["input_validation"] = st.checkbox("Input Normalization & Sanitization", value=pref.get("input_validation", True))
+
+            st.markdown("#### Default Scan Depth")
+            pref["scan_preference"] = st.radio(
+                "Scan Profile",
+                ["Quick (Smoke test high-severity indicators)", "Full (Comprehensive OWASP LLM evaluation)", "Deep Red Team (Exhaustive mutation fuzzing suite)"],
+                index=1,
+            )
+
+            col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
+            with col_b1:
+                if st.button("⬅ Back"):
+                    st.session_state["wizard_step"] = 3
+                    st.rerun()
+            with col_b3:
+                if st.button("Next: Verification ➔", use_container_width=True):
+                    st.session_state["wizard_step"] = 5
+                    st.rerun()
+
+        # ---------------------------------------------------------------------
+        # STEP 5: CONNECTION VERIFICATION
+        # ---------------------------------------------------------------------
+        elif step == 5:
+            st.markdown("### 🔌 Step 5: Verify Target Connection")
+            st.write("Perform safe, non-adversarial diagnostic checks to ensure the target endpoint is reachable.")
+
+            st.markdown(
+                f"""
+                <div class="sec-card">
+                    <div><strong>Target Endpoint:</strong> <code>{w_data.get('endpoint_url')}</code></div>
+                    <div><strong>Target Type:</strong> <code>{w_data.get('target_type')}</code></div>
+                    <div><strong>Provider Adapter:</strong> <code>{w_data.get('provider')}</code></div>
+                    <div><strong>Auth Scheme:</strong> <code>{w_data.get('auth_type')}</code></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Verification Button
+            if st.button("🔍 Verify Target Connection Now", use_container_width=True):
+                with st.spinner("Executing non-adversarial diagnostics against target..."):
+                    from app.services.connection_verifier import ConnectionVerifier
+                    import asyncio
+
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    diag = loop.run_until_complete(
+                        ConnectionVerifier.verify_connection(
+                            endpoint_url=w_data.get("endpoint_url"),
+                            target_type=w_data.get("target_type", "demo"),
+                            provider=w_data.get("provider", "demo"),
+                            auth_type=w_data.get("auth_type", "none"),
+                            credential=w_data.get("credential", None),
+                            timeout_seconds=w_data.get("timeout", 10.0),
+                        )
+                    )
+                    loop.close()
+
+                    w_data["last_verification"] = {
+                        "is_connected": diag.is_connected,
+                        "status": diag.status,
+                        "latency_ms": diag.latency_ms,
+                        "status_code": diag.status_code,
+                        "message": diag.message,
+                        "remediation": diag.remediation,
+                    }
+
+            ver = w_data.get("last_verification")
+            if ver:
+                if ver["is_connected"]:
+                    st.success(f"✅ {ver['message']} (Latency: {ver.get('latency_ms', 0)}ms)")
+                else:
+                    st.error(f"❌ Connection Status: {ver['status']} — {ver['message']}")
+                    st.info(f"💡 Remediation: {ver['remediation']}")
+
+            col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
+            with col_b1:
+                if st.button("⬅ Back"):
+                    st.session_state["wizard_step"] = 4
+                    st.rerun()
+            with col_b3:
+                if st.button("Finish Setup ➔", use_container_width=True):
+                    # Persist project to database!
+                    create_payload = {
+                        "name": w_data["name"],
+                        "description": w_data.get("description", ""),
+                        "application_type": w_data.get("application_type", "rag"),
+                        "environment": w_data.get("environment", "development"),
+                        "target_type": w_data.get("target_type", "demo"),
+                        "target_configuration": {
+                            "provider": w_data.get("provider", "demo"),
+                            "endpoint_url": w_data.get("endpoint_url"),
+                            "model_identifier": w_data.get("model_id", ""),
+                            "auth_type": w_data.get("auth_type", "none"),
+                            "credential": w_data.get("credential", None),
+                            "connection_timeout": w_data.get("timeout", 10.0),
+                        },
+                        "default_scan_preferences": w_data.get("preferences", {}),
+                    }
+                    proj_res = api.create_project(create_payload)
+                    if "error" in proj_res:
+                        st.error(f"Failed to create project: {proj_res['error']}")
+                    else:
+                        w_data["created_project_id"] = proj_res["id"]
+                        api.complete_onboarding(selected_demo=(w_data.get("target_type") == "demo"), project_id=proj_res["id"])
+                        st.session_state["active_project_id"] = proj_res["id"]
+                        st.session_state["wizard_step"] = 6
+                        st.rerun()
+
+        # ---------------------------------------------------------------------
+        # STEP 6: SETUP COMPLETION
+        # ---------------------------------------------------------------------
+        elif step == 6:
+            st.markdown("### 🎉 Setup Complete!")
+            st.balloons()
+
+            ver = w_data.get("last_verification", {})
+            conn_status = ver.get("status", "CONNECTED" if w_data.get("target_type") == "demo" else "UNVERIFIED")
+
+            st.markdown(
+                f"""
+                <div class="sec-card" style="border-left: 4px solid #10b981; padding: 24px;">
+                    <div style="font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">
+                        Project '{w_data.get('name')}' is Ready for Security Auditing
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; font-size: 0.9rem;">
+                        <div><strong>Application Architecture:</strong> <code>{w_data.get('app_type_label')}</code></div>
+                        <div><strong>Target Environment:</strong> <code>{w_data.get('env_label')}</code></div>
+                        <div><strong>Target Type:</strong> <code>{w_data.get('target_type')}</code></div>
+                        <div><strong>Connection Status:</strong> {connection_status_badge(conn_status)}</div>
+                        <div style="grid-column: span 2;"><strong>Endpoint:</strong> <code>{w_data.get('endpoint_url')}</code></div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            col_done1, col_done2 = st.columns(2)
+            with col_done1:
+                if st.button("📊 Go to Project Dashboard", use_container_width=True):
+                    st.session_state["in_setup_wizard"] = False
+                    st.session_state["dismiss_onboarding"] = True
+                    st.rerun()
+            with col_done2:
+                if st.button("🚀 Start First Security Scan", use_container_width=True):
+                    st.session_state["in_setup_wizard"] = False
+                    st.session_state["dismiss_onboarding"] = True
+                    # Set scan target
+                    st.session_state["prefill_target_url"] = w_data.get("endpoint_url")
+                    st.rerun()
+
+        st.stop()
+
 
 # =============================================================================
 # 1. MAIN OVERVIEW DASHBOARD
@@ -129,7 +638,7 @@ render_top_navbar(
 if page == "📊 Dashboard":
     render_header(
         "Security Posture Overview",
-        "Continuous automated vulnerability auditing, exploit resilience telemetry, and remediation posture.",
+        f"Continuous automated vulnerability auditing and runtime guardrail posture for project '{active_project_name}'.",
         badge="SOC Console",
     )
 
@@ -252,7 +761,6 @@ if page == "📊 Dashboard":
         if not all_findings:
             empty_state("No Vulnerability Trends", "Run an automated scan to collect telemetry over time.", icon="📊")
         else:
-            # Build daily timeseries from actual findings
             dates = []
             for f in all_findings:
                 ts = f.get("creation_timestamp", "")[:10]
@@ -357,7 +865,6 @@ if page == "📊 Dashboard":
                 unsafe_allow_html=True,
             )
         else:
-            # Display up to 3 prioritized recommendations from actual findings
             displayed = 0
             seen_categories = set()
             for f in high_priority_findings:
@@ -388,11 +895,18 @@ elif page == "🚀 Security Scanner":
         badge="Engine v1.0",
     )
 
+    # Check for active project target URL
+    default_url = "http://127.0.0.1:8000/api/v1/demo-rag/query"
+    if st.session_state.get("prefill_target_url"):
+        default_url = st.session_state["prefill_target_url"]
+    elif active_project_data and active_project_data.get("target_configuration"):
+        default_url = active_project_data["target_configuration"].get("endpoint_url", default_url)
+
     with st.form("scanner_launch_form"):
-        st.markdown("#### 🎯 Target Configuration")
+        st.markdown(f"#### 🎯 Target Configuration (Workspace: `{active_project_name}`)")
         target_url = st.text_input(
             "Target Endpoint URL",
-            value="http://127.0.0.1:8000/api/v1/demo-rag/query",
+            value=default_url,
             help="HTTP/HTTPS endpoint accepting JSON {'query': '...'} payloads",
         )
 
@@ -555,7 +1069,7 @@ elif page == "🛡️ RAG Security":
 
 
 # =============================================================================
-# 5. AGENT SECURITY (INFORMATIVE DEV STATE)
+# 5. AGENT SECURITY
 # =============================================================================
 elif page == "🤖 Agent Security":
     render_header(
@@ -616,7 +1130,6 @@ elif page == "🔍 Vulnerabilities":
     if not all_findings:
         empty_state("No Vulnerabilities Identified", "Run a security scan to identify potential vulnerabilities.", icon="🛡️")
     else:
-        # Search & Filters Bar
         col_s, col_sev, col_cat, col_status = st.columns([3, 2, 2, 2])
         search_kw = col_s.text_input("🔍 Search Findings", placeholder="Filter by title, component, or test case...")
         sev_filter = col_sev.selectbox("Severity", ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"])
@@ -640,7 +1153,6 @@ elif page == "🔍 Vulnerabilities":
 
         st.markdown(f"Displaying **{len(filtered)}** of **{len(all_findings)}** security findings:")
 
-        # Pagination controls
         page_size = 10
         total_pages = max(1, (len(filtered) + page_size - 1) // page_size)
         curr_page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
@@ -672,7 +1184,6 @@ elif page == "🔍 Vulnerabilities":
                 st.markdown("#### Captured Telemetry Evidence")
                 st.json(f.get("evidence", {}))
 
-                # Retest button
                 if st.button(f"🔄 Retest Finding {f['id'][:8]}", key=f"retest_btn_{f['id']}"):
                     with st.spinner("Retesting vulnerability mitigation against target..."):
                         retest_res = api.retest_finding(f["id"])
@@ -687,7 +1198,7 @@ elif page == "🔍 Vulnerabilities":
 
 
 # =============================================================================
-# 7. ATTACK GRAPH (VISUALIZATION)
+# 7. ATTACK GRAPH
 # =============================================================================
 elif page == "🕸️ Attack Graph":
     render_header(
@@ -757,7 +1268,7 @@ elif page == "📜 Security History":
 
 
 # =============================================================================
-# 9. AI SECURITY COPILOT (BASELINE ML & DETECTION)
+# 9. AI SECURITY COPILOT
 # =============================================================================
 elif page == "🧠 AI Security Copilot":
     render_header(
@@ -825,34 +1336,138 @@ elif page == "🧠 AI Security Copilot":
 
 
 # =============================================================================
-# 10. PROJECTS (MANAGEMENT)
+# 10. PROJECTS (MANAGEMENT & WORKSPACE OVERVIEW)
 # =============================================================================
 elif page == "📁 Projects":
     render_header(
         "Project & Target Environment Management",
-        "Manage monitored applications, environment credentials, and scope boundaries.",
-        badge="Multi-Tenant",
+        "Manage monitored applications, target configurations, live connection verification, and isolation boundaries.",
+        badge="Project Suite",
     )
 
-    in_development_card(
-        feature_name="Multi-Target Project Isolation & RBAC",
-        roadmap_details=(
-            "Manage separate security auditing configurations, targets, and historical scan telemetry "
-            "across staging, production, and third-party vendor LLM environments."
-        ),
-        phase="Phase 2 • Management Suite",
-    )
+    tab_overview, tab_create = st.tabs(["🏢 Active Projects", "➕ Create New Project"])
 
-    st.markdown("#### 🏢 Active Monitored Workspaces")
-    workspaces = [
-        {"Project Name": "ACME Enterprise RAG", "Environment": "Staging (127.0.0.1:8000)", "Target Type": "RAG Assistant", "Status": "Active"},
-        {"Project Name": "ACME Customer Support LLM", "Environment": "Development", "Target Type": "Chatbot", "Status": "Configured"},
-    ]
-    st.dataframe(pd.DataFrame(workspaces), use_container_width=True)
+    with tab_create:
+        st.markdown("#### Provision New Security Audit Project")
+        with st.form("new_project_form"):
+            np_name = st.text_input("Project Name *", placeholder="e.g. Finance Agent Production")
+            np_desc = st.text_area("Description", placeholder="Describe the application scope and boundaries...")
+            np_col1, np_col2 = st.columns(2)
+            np_app_type = np_col1.selectbox("Application Type", ["RAG Application", "LLM Chatbot", "AI Agent", "LLM-powered API", "Custom LLM Application"])
+            np_env = np_col2.selectbox("Environment", ["Development", "Testing", "Staging", "Production"])
+
+            st.markdown("##### Target Connection Parameters")
+            np_target_type = st.selectbox("Target Type", ["demo", "local_llm", "external_api"], format_func=lambda x: "Local Demo Target" if x == "demo" else ("Local LLM (Ollama/vLLM)" if x == "local_llm" else "External Authorized API"))
+            np_url = st.text_input("Endpoint URL *", value="http://127.0.0.1:8000/api/v1/demo-rag/query")
+            np_model = st.text_input("Model Identifier", value="demo-rag-v1")
+            np_auth = st.selectbox("Authentication Type", ["none", "bearer", "api_key", "basic"])
+            np_cred = st.text_input("Secret Credential / API Key (Stored Encrypted)", type="password") if np_auth != "none" else ""
+
+            submit_proj = st.form_submit_button("🚀 Provision Project", use_container_width=True)
+
+        if submit_proj:
+            if not np_name or len(np_name.strip()) < 2:
+                st.error("❌ Project name must be at least 2 characters long.")
+            else:
+                p_payload = {
+                    "name": np_name.strip(),
+                    "description": np_desc.strip(),
+                    "application_type": np_app_type.lower().replace(" ", "_"),
+                    "environment": np_env.lower(),
+                    "target_type": np_target_type,
+                    "target_configuration": {
+                        "provider": np_target_type,
+                        "endpoint_url": np_url.strip(),
+                        "model_identifier": np_model.strip(),
+                        "auth_type": np_auth,
+                        "credential": np_cred.strip() if np_cred else None,
+                        "connection_timeout": 10.0,
+                    },
+                }
+                c_res = api.create_project(p_payload)
+                if "error" in c_res:
+                    st.error(f"❌ Failed to create project: {c_res['error']}")
+                else:
+                    st.success(f"✅ Project '{np_name}' created successfully!")
+                    st.session_state["active_project_id"] = c_res["id"]
+                    time.sleep(0.5)
+                    st.rerun()
+
+    with tab_overview:
+        if not user_projects:
+            empty_state("No Projects Configured", "Create your first project using the form or setup wizard.", icon="📁")
+        else:
+            for proj in user_projects:
+                tc = proj.get("target_configuration") or {}
+                c_status = tc.get("connection_status", "UNVERIFIED")
+
+                with st.expander(f"📁 {proj['name']} ({proj.get('environment', 'dev').upper()}) — {c_status}", expanded=(proj["id"] == st.session_state.get("active_project_id"))):
+                    col_info1, col_info2, col_info3 = st.columns(3)
+                    col_info1.markdown(f"**App Architecture:** `{proj.get('application_type')}`")
+                    col_info1.markdown(f"**Target Type:** `{proj.get('target_type')}`")
+                    col_info2.markdown(f"**Environment:** `{proj.get('environment')}`")
+                    col_info2.markdown(f"**Connection:** {connection_status_badge(c_status)}", unsafe_allow_html=True)
+                    col_info3.markdown(f"**Created:** `{proj.get('created_at', '')[:10]}`")
+                    col_info3.markdown(f"**Audits Executed:** `{proj.get('scans_count', 0)}`")
+
+                    if proj.get("description"):
+                        st.markdown(f"_{proj['description']}_")
+
+                    st.markdown(
+                        f"""
+                        <div style="background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 8px; margin: 10px 0; font-size: 0.85rem;">
+                            <strong>Endpoint:</strong> <code>{tc.get('endpoint_url', 'Not configured')}</code> | 
+                            <strong>Model:</strong> <code>{tc.get('model_identifier', 'default')}</code> | 
+                            <strong>Auth:</strong> <code>{tc.get('auth_type', 'none')}</code>
+                            {f" | <strong>Masked Secret:</strong> <code>{tc.get('masked_credential')}</code>" if tc.get('masked_credential') else ""}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    # Action buttons
+                    b_col1, b_col2, b_col3, b_col4 = st.columns(4)
+
+                    with b_col1:
+                        if proj["id"] != st.session_state.get("active_project_id"):
+                            if st.button("⭐ Set as Active", key=f"set_act_{proj['id']}"):
+                                st.session_state["active_project_id"] = proj["id"]
+                                st.rerun()
+                        else:
+                            st.info("⭐ Currently Active")
+
+                    with b_col2:
+                        if st.button("🔌 Verify Connection", key=f"verify_{proj['id']}"):
+                            with st.spinner("Testing connection to target..."):
+                                v_res = api.verify_project_connection(proj["id"])
+                                if v_res.get("is_connected"):
+                                    st.success(f"✅ {v_res.get('message')} ({v_res.get('latency_ms', 0)}ms)")
+                                else:
+                                    st.error(f"❌ {v_res.get('status')}: {v_res.get('message')}")
+                                time.sleep(1)
+                                st.rerun()
+
+                    with b_col3:
+                        if st.button("🚀 Audit This Target", key=f"audit_proj_{proj['id']}"):
+                            st.session_state["active_project_id"] = proj["id"]
+                            st.session_state["prefill_target_url"] = tc.get("endpoint_url")
+                            st.success("Target prefilled! Navigate to Security Scanner to launch.")
+
+                    with b_col4:
+                        # Deletion safety check
+                        del_confirm = st.checkbox("Confirm Delete", key=f"del_chk_{proj['id']}")
+                        if del_confirm:
+                            if st.button("🗑️ Delete Project", key=f"del_btn_{proj['id']}"):
+                                api.delete_project(proj["id"])
+                                st.success("Project deleted.")
+                                if st.session_state.get("active_project_id") == proj["id"]:
+                                    st.session_state["active_project_id"] = None
+                                time.sleep(0.5)
+                                st.rerun()
 
 
 # =============================================================================
-# 11. REPORTS (AUDIT REPORTS & EXPORTS)
+# 11. REPORTS
 # =============================================================================
 elif page == "📄 Reports":
     render_header(
@@ -903,14 +1518,25 @@ elif page == "📄 Reports":
 
 
 # =============================================================================
-# 12. SETTINGS (DIAGNOSTICS & ENGINE CONFIG)
+# 12. SETTINGS
 # =============================================================================
 elif page == "⚙️ Settings":
     render_header(
         "Engine Settings & Diagnostics",
-        "Platform diagnostic telemetry, backend API health, and security scanning defaults.",
+        "Platform diagnostic telemetry, onboarding controls, backend API health, and security defaults.",
         badge="Platform Config",
     )
+
+    st.markdown("#### 🌟 Onboarding & Setup")
+    st.write("Revisit the setup wizard to configure new target applications or re-run first-time orientation.")
+    col_onb1, col_onb2 = st.columns([2, 4])
+    with col_onb1:
+        if st.button("🔄 Revisit Onboarding Setup Wizard", use_container_width=True):
+            api.reset_onboarding()
+            st.session_state["in_setup_wizard"] = True
+            st.session_state["wizard_step"] = 1
+            st.session_state["dismiss_onboarding"] = False
+            st.rerun()
 
     st.markdown("#### 🖥️ Engine Telemetry")
     col1, col2, col3 = st.columns(3)
@@ -923,3 +1549,4 @@ elif page == "⚙️ Settings":
     st.write("- **Per-Request Timeout:** 10.0 seconds")
     st.write("- **Adversarial Mutation Default:** Enabled (Base64, Leetspeak, Homoglyph, ROT13, Delimiter)")
     st.write("- **Formula Injection Defense (CWE-1236):** Enforced on all CSV exports")
+    st.write("- **SSRF & Metadata Protection:** Strict enforcement on all external target connections")

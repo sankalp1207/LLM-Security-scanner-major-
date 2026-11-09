@@ -188,3 +188,136 @@ class ScannerAPIClient:
         except Exception as e:
             return {"error": str(e)}
         return {}
+
+    # -------------------------------------------------------------------------
+    # PROJECTS & ONBOARDING CLIENT METHODS
+    # -------------------------------------------------------------------------
+    def get_onboarding_status(self) -> Dict[str, Any]:
+        """Fetch onboarding completion status for user."""
+        try:
+            with httpx.Client(timeout=4.0) as client:
+                res = client.get(f"{self.api_v1}/onboarding/status")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return {"is_completed": False, "selected_demo": False, "has_projects": False}
+
+    def complete_onboarding(self, selected_demo: bool = False, project_id: Optional[str] = None) -> Dict[str, Any]:
+        """Mark onboarding as complete for user."""
+        payload = {"selected_demo": selected_demo, "project_id": project_id}
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.post(f"{self.api_v1}/onboarding/complete", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+        except Exception as e:
+            return {"error": str(e)}
+        return {"is_completed": True}
+
+    def reset_onboarding(self) -> Dict[str, Any]:
+        """Reset onboarding state."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.post(f"{self.api_v1}/onboarding/reset")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception as e:
+            return {"error": str(e)}
+        return {"is_completed": False}
+
+    def list_projects(self, skip: int = 0, limit: int = 50, include_archived: bool = False) -> List[Dict[str, Any]]:
+        """List projects for user."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/projects?skip={skip}&limit={limit}&include_archived={include_archived}")
+                if res.status_code == 200:
+                    return res.json().get("items", [])
+        except Exception:
+            pass
+        return []
+
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve project details by ID."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/projects/{project_id}")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return None
+
+    def create_project(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Create new project."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.post(f"{self.api_v1}/projects", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def update_project(self, project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Update existing project."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.patch(f"{self.api_v1}/projects/{project_id}", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def delete_project(self, project_id: str) -> Dict[str, Any]:
+        """Delete project."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.delete(f"{self.api_v1}/projects/{project_id}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.text}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def verify_project_connection(
+        self,
+        project_id: str,
+        override_req: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Trigger diagnostic connection verification."""
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(
+                    f"{self.api_v1}/projects/{project_id}/verify-connection",
+                    json=override_req or {},
+                )
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text), "is_connected": False, "status": "ERROR"}
+        except Exception as e:
+            return {"error": str(e), "is_connected": False, "status": "ERROR"}
+
+    def get_project_preferences(self, project_id: str) -> Dict[str, Any]:
+        """Get project security preferences."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.get(f"{self.api_v1}/projects/{project_id}/preferences")
+                if res.status_code == 200:
+                    return res.json()
+        except Exception:
+            pass
+        return {}
+
+    def update_project_preferences(self, project_id: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Update project security preferences."""
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                res = client.patch(f"{self.api_v1}/projects/{project_id}/preferences", json=preferences)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.text}
+        except Exception as e:
+            return {"error": str(e)}
+
