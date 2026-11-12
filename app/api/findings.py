@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.schemas.scans import FindingResponse
+from app.schemas.remediation import RemediationInitRequest, RemediationResponse
 from app.services.finding_service import FindingService
+from app.services.remediation_service import RemediationService
 
 router = APIRouter(prefix="/findings", tags=["Findings"])
 
@@ -83,3 +85,18 @@ def retest_finding(
 ) -> Dict[str, Any]:
     """Retest an identified vulnerability to verify mitigation effectiveness."""
     return FindingService.retest_finding(db=db, finding_id=finding_id)
+
+
+@router.post("/{finding_id}/remediation", response_model=RemediationResponse)
+def create_finding_remediation(
+    finding_id: str,
+    request: Optional[RemediationInitRequest] = None,
+    x_user_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> RemediationResponse:
+    """Analyze a vulnerability finding and generate automated remediation."""
+    user_id = (x_user_id or "default_user").strip()
+    ws_root = request.workspace_root if request else None
+    return RemediationService.initiate_remediation(
+        db=db, finding_id=finding_id, user_id=user_id, workspace_root=ws_root
+    )

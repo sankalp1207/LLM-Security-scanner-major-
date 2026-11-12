@@ -19,6 +19,22 @@ from app.schemas.events import (
     ScanProgressResponse,
 )
 
+from app.schemas.remediation import (
+    PatchApplyRequest,
+    PatchApplyResponse,
+    PatchApprovalRequest,
+    PatchApprovalResponse,
+    PatchValidationResponse,
+    RemediationHistoryItem,
+    RemediationHistoryResponse,
+    RemediationInitRequest,
+    RemediationPatchFile,
+    RemediationPatchResponse,
+    RemediationResponse,
+    RemediationRollbackResponse,
+    RemediationVerifyResponse,
+)
+
 __all__ = [
     "ScanEventType",
     "ScanEventSchema",
@@ -34,4 +50,17 @@ __all__ = [
     "FindingExplanationResponse",
     "CopilotCompareScansRequest",
     "ScanComparisonResponse",
+    "RemediationInitRequest",
+    "RemediationResponse",
+    "RemediationPatchFile",
+    "RemediationPatchResponse",
+    "PatchValidationResponse",
+    "PatchApprovalRequest",
+    "PatchApprovalResponse",
+    "PatchApplyRequest",
+    "PatchApplyResponse",
+    "RemediationVerifyResponse",
+    "RemediationRollbackResponse",
+    "RemediationHistoryItem",
+    "RemediationHistoryResponse",
 ]

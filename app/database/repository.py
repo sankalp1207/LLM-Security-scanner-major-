@@ -12,6 +12,10 @@ from app.database.models import (
     Finding,
     ModelEvaluation,
     Project,
+    Remediation,
+    RemediationApproval,
+    RemediationExecution,
+    RemediationPatch,
     Scan,
     ScanEvent,
     SecurityTestCase,
@@ -1133,6 +1137,305 @@ class CopilotRepository:
             .scalar()
             or 0
         )
+
+
+class RemediationRepository:
+    """Repository managing Remediation, Patch, Approval, and Execution persistence."""
+
+    @staticmethod
+    def create_remediation(
+        db: Session,
+        finding_id: str,
+        user_id: str,
+        project_id: Optional[str] = None,
+        summary: str = "Vulnerability Remediation",
+        root_cause_analysis: str = "",
+        affected_component: str = "unknown",
+        status: str = "ANALYZING",
+    ) -> Remediation:
+        """Create and persist an initial remediation entity."""
+        now = datetime.now(timezone.utc)
+        record = Remediation(
+            project_id=project_id,
+            finding_id=finding_id,
+            user_id=user_id,
+            status=status,
+            summary=summary,
+            root_cause_analysis=root_cause_analysis,
+            affected_component=affected_component,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
+    def get_remediation(db: Session, remediation_id: str) -> Optional[Remediation]:
+        """Fetch remediation record by ID."""
+        return db.query(Remediation).filter(Remediation.id == remediation_id).first()
+
+    @staticmethod
+    def update_remediation_status(db: Session, remediation_id: str, status: str) -> Optional[Remediation]:
+        """Update remediation lifecycle state."""
+        rec = db.query(Remediation).filter(Remediation.id == remediation_id).first()
+        if not rec:
+            return None
+        rec.status = status
+        rec.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(rec)
+        return rec
+
+    @staticmethod
+    def update_remediation(
+        db: Session,
+        remediation_id: str,
+        summary: Optional[str] = None,
+        root_cause_analysis: Optional[str] = None,
+        affected_component: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Optional[Remediation]:
+        """Update remediation details."""
+        rec = db.query(Remediation).filter(Remediation.id == remediation_id).first()
+        if not rec:
+            return None
+        if summary is not None:
+            rec.summary = summary
+        if root_cause_analysis is not None:
+            rec.root_cause_analysis = root_cause_analysis
+        if affected_component is not None:
+            rec.affected_component = affected_component
+        if status is not None:
+            rec.status = status
+        rec.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(rec)
+        return rec
+
+    @staticmethod
+    def list_remediations(
+        db: Session,
+        project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        finding_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> List[Remediation]:
+        """List remediations matching query filters."""
+        q = db.query(Remediation)
+        if project_id:
+            q = q.filter(Remediation.project_id == project_id)
+        if user_id:
+            q = q.filter(Remediation.user_id == user_id)
+        if finding_id:
+            q = q.filter(Remediation.finding_id == finding_id)
+        return q.order_by(Remediation.created_at.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def count_remediations(
+        db: Session,
+        project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        finding_id: Optional[str] = None,
+    ) -> int:
+        """Count total remediations matching query filters."""
+        q = db.query(func.count(Remediation.id))
+        if project_id:
+            q = q.filter(Remediation.project_id == project_id)
+        if user_id:
+            q = q.filter(Remediation.user_id == user_id)
+        if finding_id:
+            q = q.filter(Remediation.finding_id == finding_id)
+        return q.scalar() or 0
+
+    @staticmethod
+    def create_patch(
+        db: Session,
+        remediation_id: str,
+        summary: str,
+        files_manifest: list,
+        diff_content: str,
+        source_hashes: dict,
+        validation_status: str = "PENDING",
+        validation_errors: Optional[list] = None,
+        risks: Optional[list] = None,
+        verification_steps: Optional[list] = None,
+        patch_version: Optional[int] = None,
+    ) -> RemediationPatch:
+        """Create and persist a proposed patch version for a remediation."""
+        if patch_version is None:
+            existing_count = (
+                db.query(func.count(RemediationPatch.id))
+                .filter(RemediationPatch.remediation_id == remediation_id)
+                .scalar()
+                or 0
+            )
+            patch_version = existing_count + 1
+
+        patch = RemediationPatch(
+            remediation_id=remediation_id,
+            patch_version=patch_version,
+            summary=summary,
+            files_manifest=files_manifest,
+            diff_content=diff_content,
+            source_hashes=source_hashes,
+            validation_status=validation_status,
+            validation_errors=validation_errors or [],
+            risks=risks or [],
+            verification_steps=verification_steps or [],
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(patch)
+        db.commit()
+        db.refresh(patch)
+        return patch
+
+    @staticmethod
+    def get_patch(db: Session, patch_id: str) -> Optional[RemediationPatch]:
+        """Fetch patch by ID."""
+        return db.query(RemediationPatch).filter(RemediationPatch.id == patch_id).first()
+
+    @staticmethod
+    def get_latest_patch(db: Session, remediation_id: str) -> Optional[RemediationPatch]:
+        """Fetch latest patch version for a remediation."""
+        return (
+            db.query(RemediationPatch)
+            .filter(RemediationPatch.remediation_id == remediation_id)
+            .order_by(RemediationPatch.patch_version.desc())
+            .first()
+        )
+
+    @staticmethod
+    def list_patches(db: Session, remediation_id: str) -> List[RemediationPatch]:
+        """List all patches for a remediation."""
+        return (
+            db.query(RemediationPatch)
+            .filter(RemediationPatch.remediation_id == remediation_id)
+            .order_by(RemediationPatch.patch_version.asc())
+            .all()
+        )
+
+    @staticmethod
+    def update_patch_validation(
+        db: Session,
+        patch_id: str,
+        validation_status: str,
+        validation_errors: list,
+    ) -> Optional[RemediationPatch]:
+        """Update validation outcome for a patch."""
+        patch = db.query(RemediationPatch).filter(RemediationPatch.id == patch_id).first()
+        if not patch:
+            return None
+        patch.validation_status = validation_status
+        patch.validation_errors = validation_errors
+        db.commit()
+        db.refresh(patch)
+        return patch
+
+    @staticmethod
+    def create_approval(
+        db: Session,
+        patch_id: str,
+        user_id: str,
+        decision: str,
+        reason: str = "",
+    ) -> RemediationApproval:
+        """Record explicit human approval or rejection of a patch."""
+        approval = RemediationApproval(
+            patch_id=patch_id,
+            user_id=user_id,
+            decision=decision,
+            reason=reason,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(approval)
+        db.commit()
+        db.refresh(approval)
+        return approval
+
+    @staticmethod
+    def get_latest_approval(db: Session, patch_id: str) -> Optional[RemediationApproval]:
+        """Fetch the latest approval or rejection record for a patch."""
+        return (
+            db.query(RemediationApproval)
+            .filter(RemediationApproval.patch_id == patch_id)
+            .order_by(RemediationApproval.created_at.desc())
+            .first()
+        )
+
+    @staticmethod
+    def create_execution(
+        db: Session,
+        remediation_id: str,
+        patch_id: str,
+        execution_status: str = "APPLIED",
+        backup_manifest: Optional[dict] = None,
+        test_summary: Optional[dict] = None,
+        retest_status: str = "INCONCLUSIVE",
+        retest_evidence: Optional[dict] = None,
+        error_message: Optional[str] = None,
+    ) -> RemediationExecution:
+        """Create and persist an execution record tracking patch application and retest."""
+        now = datetime.now(timezone.utc)
+        record = RemediationExecution(
+            remediation_id=remediation_id,
+            patch_id=patch_id,
+            execution_status=execution_status,
+            backup_manifest=backup_manifest or {},
+            test_summary=test_summary or {},
+            retest_status=retest_status,
+            retest_evidence=retest_evidence or {},
+            error_message=error_message,
+            started_at=now,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    @staticmethod
+    def update_execution(
+        db: Session,
+        execution_id: str,
+        execution_status: Optional[str] = None,
+        test_summary: Optional[dict] = None,
+        retest_status: Optional[str] = None,
+        retest_evidence: Optional[dict] = None,
+        error_message: Optional[str] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> Optional[RemediationExecution]:
+        """Update an execution record with test and retest outcomes."""
+        rec = db.query(RemediationExecution).filter(RemediationExecution.id == execution_id).first()
+        if not rec:
+            return None
+        if execution_status is not None:
+            rec.execution_status = execution_status
+        if test_summary is not None:
+            rec.test_summary = test_summary
+        if retest_status is not None:
+            rec.retest_status = retest_status
+        if retest_evidence is not None:
+            rec.retest_evidence = retest_evidence
+        if error_message is not None:
+            rec.error_message = error_message
+        if completed_at is not None:
+            rec.completed_at = completed_at
+        db.commit()
+        db.refresh(rec)
+        return rec
+
+    @staticmethod
+    def get_latest_execution(db: Session, remediation_id: str) -> Optional[RemediationExecution]:
+        """Fetch the most recent execution for a remediation."""
+        return (
+            db.query(RemediationExecution)
+            .filter(RemediationExecution.remediation_id == remediation_id)
+            .order_by(RemediationExecution.started_at.desc())
+            .first()
+        )
+
 
 
 

@@ -93,6 +93,7 @@ class Finding(Base):
 
     # Relationships
     scan = relationship("Scan", back_populates="findings")
+    remediations = relationship("Remediation", back_populates="finding", cascade="all, delete-orphan")
 
 
 class TestExecution(Base):
@@ -262,6 +263,7 @@ class Project(Base):
     )
     scans = relationship("Scan", back_populates="project")
     copilot_conversations = relationship("CopilotConversation", back_populates="project", cascade="all, delete-orphan")
+    remediations = relationship("Remediation", back_populates="project", cascade="all, delete-orphan")
 
 
 class TargetConfiguration(Base):
@@ -373,4 +375,136 @@ class CopilotMessage(Base):
 
     # Relationships
     conversation = relationship("CopilotConversation", back_populates="messages")
+
+
+class Remediation(Base):
+    """Database model for an end-to-end vulnerability remediation lifecycle."""
+
+    __tablename__ = "remediations"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    project_id = Column(String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
+    finding_id = Column(String(64), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(64), default="default_user", nullable=False, index=True)
+    status = Column(String(32), default="ANALYZING", nullable=False, index=True)
+    # Status lifecycle: ANALYZING -> FIX_PROPOSED -> VALIDATION_FAILED -> AWAITING_APPROVAL -> APPROVED -> REJECTED -> PATCH_APPLYING -> PATCH_APPLIED -> TESTING -> RETEST_COMPLETED -> FAILED -> ROLLED_BACK
+    summary = Column(String(255), default="Vulnerability Remediation", nullable=False)
+    root_cause_analysis = Column(Text, default="", nullable=False)
+    affected_component = Column(String(128), default="unknown", nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="remediations")
+    finding = relationship("Finding", back_populates="remediations")
+    patches = relationship(
+        "RemediationPatch",
+        back_populates="remediation",
+        cascade="all, delete-orphan",
+        order_by="RemediationPatch.patch_version.asc()",
+    )
+    executions = relationship(
+        "RemediationExecution",
+        back_populates="remediation",
+        cascade="all, delete-orphan",
+        order_by="RemediationExecution.started_at.desc()",
+    )
+
+
+class RemediationPatch(Base):
+    """Database model for a proposed code fix patch version."""
+
+    __tablename__ = "remediation_patches"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    remediation_id = Column(
+        String(64), ForeignKey("remediations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    patch_version = Column(Integer, default=1, nullable=False)
+    summary = Column(String(255), default="", nullable=False)
+    files_manifest = Column(JSON, default=list, nullable=False)
+    # [{"path": str, "change_type": "modify|create", "reason": str, "diff": str, "original_content": str, "patched_content": str}]
+    diff_content = Column(Text, default="", nullable=False)
+    source_hashes = Column(JSON, default=dict, nullable=False)  # {"path": "sha256_hash"}
+    validation_status = Column(String(32), default="PENDING", nullable=False)  # PENDING, VALID, INVALID
+    validation_errors = Column(JSON, default=list, nullable=False)
+    risks = Column(JSON, default=list, nullable=False)
+    verification_steps = Column(JSON, default=list, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    remediation = relationship("Remediation", back_populates="patches")
+    approvals = relationship("RemediationApproval", back_populates="patch", cascade="all, delete-orphan")
+    executions = relationship("RemediationExecution", back_populates="patch", cascade="all, delete-orphan")
+
+
+class RemediationApproval(Base):
+    """Database model tracking explicit human approval or rejection of a proposed patch."""
+
+    __tablename__ = "remediation_approvals"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    patch_id = Column(
+        String(64), ForeignKey("remediation_patches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id = Column(String(64), default="default_user", nullable=False, index=True)
+    decision = Column(String(32), nullable=False)  # APPROVED, REJECTED, CANCELLED
+    reason = Column(Text, default="", nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    patch = relationship("RemediationPatch", back_populates="approvals")
+
+
+class RemediationExecution(Base):
+    """Database model tracking patch application, unit testing, and vulnerability retest verification."""
+
+    __tablename__ = "remediation_executions"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    remediation_id = Column(
+        String(64), ForeignKey("remediations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    patch_id = Column(
+        String(64), ForeignKey("remediation_patches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    execution_status = Column(String(32), default="APPLIED", nullable=False, index=True)
+    # APPLIED, FAILED, ROLLED_BACK
+    backup_manifest = Column(JSON, default=dict, nullable=False)  # {"rel_path": original_content_str}
+    test_summary = Column(JSON, default=dict, nullable=False)
+    retest_status = Column(String(32), default="INCONCLUSIVE", nullable=False)
+    # FIXED, PARTIALLY_FIXED, NOT_FIXED, REGRESSION_DETECTED, INCONCLUSIVE, PATCH_FAILED, TEST_EXECUTION_FAILED
+    retest_evidence = Column(JSON, default=dict, nullable=False)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    remediation = relationship("Remediation", back_populates="executions")
+    patch = relationship("RemediationPatch", back_populates="executions")
+
 

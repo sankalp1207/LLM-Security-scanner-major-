@@ -151,7 +151,7 @@ with st.sidebar:
     page_analysis = ["🔍 Vulnerabilities", "🕸️ Attack Graph", "📜 Security History"]
 
     st.markdown("<div style='font-size: 0.7rem; font-weight: 700; color: #64748b; letter-spacing: 0.08em; margin-top: 10px; margin-bottom: 4px;'>INTELLIGENCE</div>", unsafe_allow_html=True)
-    page_intel = ["🧠 AI Security Copilot"]
+    page_intel = ["🧠 AI Security Copilot", "🔧 Automated Remediation"]
 
     st.markdown("<div style='font-size: 0.7rem; font-weight: 700; color: #64748b; letter-spacing: 0.08em; margin-top: 10px; margin-bottom: 4px;'>MANAGEMENT</div>", unsafe_allow_html=True)
     page_management = ["📁 Projects", "📄 Reports", "⚙️ Settings"]
@@ -164,7 +164,10 @@ with st.sidebar:
         + page_management
     )
 
-    page = st.radio("Navigation", all_pages, label_visibility="collapsed")
+    current_nav = st.session_state.get("page", all_pages[0])
+    nav_index = all_pages.index(current_nav) if current_nav in all_pages else 0
+    page = st.radio("Navigation", all_pages, index=nav_index, label_visibility="collapsed")
+    st.session_state["page"] = page
 
     st.divider()
     st.markdown(
@@ -1683,7 +1686,7 @@ elif page == "🔍 Vulnerabilities":
                 st.markdown("#### Captured Telemetry Evidence")
                 st.json(f.get("evidence", {}))
 
-                btn_v1, btn_v2 = st.columns([1, 1])
+                btn_v1, btn_v2, btn_v3 = st.columns([1, 1, 1])
                 with btn_v1:
                     if st.button(f"🔄 Retest Finding {f['id'][:8]}", key=f"retest_btn_{f['id']}", use_container_width=True):
                         with st.spinner("Retesting vulnerability mitigation against target..."):
@@ -1697,11 +1700,16 @@ elif page == "🔍 Vulnerabilities":
                                     st.error(f"❌ {retest_res.get('message', 'Vulnerability still present.')}")
                                 st.rerun()
                 with btn_v2:
-                    if st.button("🧠 Explain with AI Copilot", key=f"copilot_exp_v_{f['id']}", use_container_width=True):
+                    if st.button("🧠 Explain with Copilot", key=f"copilot_exp_v_{f['id']}", use_container_width=True):
                         st.session_state["copilot_attached_finding_id"] = f["id"]
                         st.session_state["copilot_attached_finding_title"] = f.get("title", "")
                         st.session_state["copilot_query_trigger"] = f"Explain vulnerability finding '{f['id']}': {f.get('title', '')}. Analyze the root cause and provide actionable code remediation."
                         st.session_state["page"] = "🧠 AI Security Copilot"
+                        st.rerun()
+                with btn_v3:
+                    if st.button("🔧 Generate Fix with AI", key=f"remed_btn_v_{f['id']}", use_container_width=True):
+                        st.session_state["remediation_finding_id"] = f["id"]
+                        st.session_state["page"] = "🔧 Automated Remediation"
                         st.rerun()
 
 
@@ -2151,6 +2159,281 @@ elif page == "🧠 AI Security Copilot":
                         st.markdown("#### Matched Indicators:")
                         for ind in det_res["matched_indicators"]:
                             st.write(f"- {ind}")
+
+
+# =============================================================================
+# 9B. AUTOMATED REMEDIATION ASSISTANT (PHASE 6)
+# =============================================================================
+elif page == "🔧 Automated Remediation":
+    render_header(
+        "Automated Remediation Assistant",
+        "Move from vulnerability detection to verified mitigation: analyze findings, inspect code diffs, approve patches, and execute verifiable retesting.",
+        badge="AI Remediation Engine",
+    )
+
+    all_findings = api.list_all_findings(limit=200)
+
+    if not all_findings:
+        empty_state(
+            "No Vulnerability Findings Available",
+            "Run a Quick Scan, Full Scan, or Deep Red Team scan to identify vulnerabilities for automated remediation.",
+            icon="🛡️",
+        )
+    else:
+        # 1. Target Finding Selector
+        st.markdown("### 🎯 Select Target Vulnerability Finding")
+        finding_map = {
+            f"{f.get('severity', 'MED')} | {f.get('title', 'Finding')} ({f.get('category', 'unknown')}) — {f['id'][:8]}": f
+            for f in all_findings
+        }
+        finding_keys = list(finding_map.keys())
+
+        # Auto-select pre-attached finding from other pages if present
+        default_finding_idx = 0
+        attached_f_id = st.session_state.get("remediation_finding_id")
+        if attached_f_id:
+            for idx, k in enumerate(finding_keys):
+                if attached_f_id in k or finding_map[k]["id"] == attached_f_id:
+                    default_finding_idx = idx
+                    break
+
+        selected_label = st.selectbox("Active Finding", finding_keys, index=default_finding_idx)
+        selected_finding = finding_map[selected_label]
+        finding_id = selected_finding["id"]
+
+        # 2. Workflow Stage Stepper
+        st.markdown(
+            """
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; font-size: 0.75rem; font-weight: 600;">
+                <span style="background: #1e293b; color: #94a3b8; padding: 4px 10px; border-radius: 4px; border: 1px solid #334155;">1. DETECT</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #38bdf8; padding: 4px 10px; border-radius: 4px; border: 1px solid #0284c7;">2. ANALYZE</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #a855f7; padding: 4px 10px; border-radius: 4px; border: 1px solid #9333ea;">3. PROPOSE FIX</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #eab308; padding: 4px 10px; border-radius: 4px; border: 1px solid #ca8a04;">4. VALIDATE</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #f97316; padding: 4px 10px; border-radius: 4px; border: 1px solid #ea580c;">5. REVIEW DIFF</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #ec4899; padding: 4px 10px; border-radius: 4px; border: 1px solid #db2777;">6. APPROVE</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #10b981; padding: 4px 10px; border-radius: 4px; border: 1px solid #059669;">7. APPLY</span>
+                <span style="color: #64748b;">➔</span>
+                <span style="background: #1e293b; color: #06b6d4; padding: 4px 10px; border-radius: 4px; border: 1px solid #0891b2;">8. RETEST</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        tab_active, tab_history = st.tabs(["⚡ Active Remediation", "📜 Remediation History"])
+
+        with tab_active:
+            # Finding Details & Analysis Card
+            col_info1, col_info2, col_info3 = st.columns([2, 1, 1])
+            with col_info1:
+                st.markdown(f"**Finding**: `{selected_finding.get('title')}`")
+                st.markdown(f"**Component**: `{selected_finding.get('target_component', 'unknown')}`")
+            with col_info2:
+                st.markdown(f"**Severity**: {severity_badge(selected_finding.get('severity', 'MED'))}", unsafe_allow_html=True)
+                st.markdown(f"**Category**: `{selected_finding.get('category')}`")
+            with col_info3:
+                curr_status = selected_finding.get("retest_status", "NOT_RETESTED")
+                status_color = "#10b981" if curr_status == "RETEST_PASSED" else ("#ef4444" if curr_status == "RETEST_FAILED" else "#94a3b8")
+                st.markdown(f"**Current Status**: <span style='color:{status_color}; font-weight:700;'>{curr_status}</span>", unsafe_allow_html=True)
+
+            with st.expander("🔍 View Captured Telemetry Evidence & Description"):
+                st.write(selected_finding.get("description", ""))
+                st.json(selected_finding.get("evidence", {}))
+
+            st.divider()
+
+            # Initiate / Fetch Remediation State
+            rem_res = api.initiate_remediation(finding_id)
+            if "error" in rem_res:
+                st.error(f"Remediation initialization error: {rem_res['error']}")
+            else:
+                rem_id = rem_res["id"]
+                rem_status = rem_res.get("status", "ANALYZING")
+                latest_patch_id = rem_res.get("latest_patch_id")
+
+                st.markdown(f"#### 🧠 Root-Cause Analysis")
+                st.info(rem_res.get("root_cause_analysis", "Vulnerability under analysis."))
+
+                # Action Button: Generate / Regenerate Patch
+                col_gen1, col_gen2 = st.columns([2, 4])
+                with col_gen1:
+                    if st.button("⚡ Generate Proposed Fix with AI", use_container_width=True):
+                        with st.spinner("Analyzing source code and synthesizing security patch..."):
+                            gen_res = api.generate_fix(rem_id)
+                            if "error" in gen_res:
+                                st.error(f"Fix generation error: {gen_res['error']}")
+                            else:
+                                st.success("✅ Proposed patch synthesized successfully!")
+                                st.rerun()
+
+                # If patch exists, display review and diff
+                if latest_patch_id:
+                    patch_data = api.get_patch(latest_patch_id)
+                    if "error" not in patch_data:
+                        st.markdown("---")
+                        st.markdown(f"### 📄 Code Diff & Patch Review (Version {patch_data.get('patch_version', 1)})")
+                        st.markdown(f"**Summary**: {patch_data.get('summary', '')}")
+
+                        # Files affected list
+                        files = patch_data.get("files", [])
+                        st.markdown("**Target Files Affected:**")
+                        for f_item in files:
+                            st.write(f"- `{f_item.get('path')}` ({f_item.get('change_type', 'modify')}): {f_item.get('reason', '')}")
+
+                        # Display Code Diff
+                        st.markdown("#### 🔄 Proposed Changes (Unified Diff)")
+                        diff_text = patch_data.get("diff_content", "")
+                        if diff_text:
+                            st.code(diff_text, language="diff")
+                        else:
+                            st.write("No direct diff available. Review configuration advice.")
+
+                        # Risks & Verification Steps
+                        c_r1, c_r2 = st.columns(2)
+                        with c_r1:
+                            st.markdown("#### ⚠️ Potential Risks & Side Effects")
+                            for r_item in patch_data.get("risks", []):
+                                st.write(f"- {r_item}")
+                        with c_r2:
+                            st.markdown("#### 📋 Recommended Verification Steps")
+                            for v_item in patch_data.get("verification_steps", []):
+                                st.write(f"- {v_item}")
+
+                        # Patch Validation Report
+                        st.markdown("#### 🛡️ Patch Safety Validation")
+                        v_status = patch_data.get("validation_status", "PENDING")
+                        v_errors = patch_data.get("validation_errors", [])
+                        if v_status == "VALID":
+                            st.success("✅ **Patch Validated**: Workspace containment, path safety, and file hashes verified. Ready for human approval.")
+                        else:
+                            st.error(f"❌ **Validation Failed**: {'; '.join(v_errors) if v_errors else 'Safety violation detected.'}")
+
+                        # Human Approval Controls
+                        st.markdown("---")
+                        st.markdown("### 👤 Human-in-the-Loop Approval Gate")
+                        st.warning("⚠️ **Explicit Approval Required**: The Remediation Engine will NEVER modify workspace files without human authorization.")
+
+                        col_app1, col_app2, col_app3, col_app4 = st.columns(4)
+                        approval_decision = patch_data.get("approval_status")
+
+                        with col_app1:
+                            if st.button("✅ Approve Patch", use_container_width=True, disabled=(v_status != "VALID")):
+                                app_res = api.approve_patch(latest_patch_id, reason="Approved via Security Dashboard")
+                                if "error" in app_res:
+                                    st.error(app_res["error"])
+                                else:
+                                    st.success("✅ Patch Approved!")
+                                    st.rerun()
+
+                        with col_app2:
+                            if st.button("❌ Reject Patch", use_container_width=True):
+                                rej_res = api.reject_patch(latest_patch_id, reason="Rejected by human reviewer")
+                                if "error" in rej_res:
+                                    st.error(rej_res["error"])
+                                else:
+                                    st.info("Patch Rejected.")
+                                    st.rerun()
+
+                        with col_app3:
+                            if st.button("🔄 Regenerate Patch", use_container_width=True):
+                                api.generate_fix(rem_id)
+                                st.rerun()
+
+                        with col_app4:
+                            st.download_button(
+                                label="📥 Download .patch File",
+                                data=diff_text,
+                                file_name=f"patch_{latest_patch_id[:8]}.patch",
+                                mime="text/x-diff",
+                                use_container_width=True,
+                            )
+
+                        # Status Banner
+                        if approval_decision == "APPROVED":
+                            st.markdown(
+                                "<div style='background: #064e3b; color: #6ee7b7; padding: 12px; border-radius: 6px; margin: 12px 0; font-weight: 600;'>"
+                                "✅ Patch Approved by Operator — Authorized for controlled workspace application."
+                                "</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                            # Controlled Patch Application Action
+                            col_apply1, col_apply2 = st.columns([2, 4])
+                            with col_apply1:
+                                if st.button("🚀 Apply Patch in Workspace", use_container_width=True):
+                                    with st.spinner("Applying patch and creating automatic file backups..."):
+                                        apply_res = api.apply_patch(latest_patch_id)
+                                        if "error" in apply_res:
+                                            st.error(f"Application error: {apply_res['error']}")
+                                        else:
+                                            st.success(f"✅ Patch applied! {len(apply_res.get('applied_files', []))} files modified with rollback backups.")
+                                            st.rerun()
+
+                        # If patch has been applied: Show verification & retesting panel
+                        if rem_status in ("PATCH_APPLIED", "TESTING", "RETEST_COMPLETED", "ROLLED_BACK"):
+                            st.markdown("---")
+                            st.markdown("### 🧪 Verifiable Security Retesting & Outcomes")
+
+                            col_test1, col_test2 = st.columns([2, 4])
+                            with col_test1:
+                                if st.button("🔬 Retest Original Vulnerability", use_container_width=True):
+                                    with st.spinner("Executing unit validation tests and retesting target endpoint..."):
+                                        verify_res = api.verify_remediation(rem_id)
+                                        if "error" in verify_res:
+                                            st.error(f"Retest failed: {verify_res['error']}")
+                                        else:
+                                            st.session_state["latest_verify_res"] = verify_res
+                                            st.rerun()
+
+                            # Display retest outcome
+                            v_res = st.session_state.get("latest_verify_res")
+                            if v_res and v_res.get("remediation_id") == rem_id:
+                                final_outcome = v_res.get("retest_status", "INCONCLUSIVE")
+                                if final_outcome == "FIXED":
+                                    st.success(f"🎉 **VULNERABILITY RESOLVED (FIXED)**: {v_res.get('outcome', '')}")
+                                elif final_outcome == "NOT_FIXED":
+                                    st.error(f"❌ **REMEDIATION INEFFECTIVE (NOT_FIXED)**: {v_res.get('outcome', '')}")
+                                elif final_outcome == "REGRESSION_DETECTED":
+                                    st.warning(f"⚠️ **REGRESSION DETECTED**: {v_res.get('outcome', '')}")
+                                else:
+                                    st.info(f"ℹ️ **Status**: {final_outcome} — {v_res.get('outcome', '')}")
+
+                                # Show unit test summary
+                                st.json(v_res.get("test_summary", {}))
+
+                            # Rollback Support
+                            st.markdown("#### ⏪ Rollback Controls")
+                            st.caption("Revert applied patch files to their exact pre-patch contents using the recorded backup manifest.")
+                            if st.button("⏪ Rollback Applied Patch", use_container_width=True):
+                                with st.spinner("Rolling back changes from backup manifest..."):
+                                    rb_res = api.rollback_remediation(rem_id)
+                                    if "error" in rb_res:
+                                        st.error(f"Rollback error: {rb_res['error']}")
+                                    else:
+                                        st.info("✅ Workspace successfully rolled back to pre-patch state.")
+                                        st.rerun()
+
+        with tab_history:
+            st.markdown("### 📜 Remediation Audit Trail")
+            proj_id = selected_finding.get("project_id") or active_project_id
+            history_data = api.list_remediation_history(proj_id) if proj_id else {"total": 0, "items": []}
+            items = history_data.get("items", [])
+            if not items:
+                empty_state("No Remediation History", "Remediation workflows for this project will appear here.", icon="📜")
+            else:
+                for h_item in items:
+                    with st.expander(f"🔧 Remediation `{h_item['id'][:8]}` — {h_item['finding_title']} ({h_item['status']})"):
+                        st.markdown(f"**Status**: `{h_item['status']}`")
+                        st.markdown(f"**Finding**: `{h_item['finding_id']}` ({h_item['finding_category']})")
+                        st.markdown(f"**Severity**: {severity_badge(h_item['severity'])}", unsafe_allow_html=True)
+                        st.markdown(f"**Patches Evaluated**: `{h_item['patch_count']}`")
+                        st.markdown(f"**Retest Outcome**: `{h_item.get('latest_retest_status', 'N/A')}`")
+                        st.markdown(f"**Timestamp**: `{h_item['created_at'][:19]}`")
 
 
 # =============================================================================

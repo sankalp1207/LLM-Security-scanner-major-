@@ -578,5 +578,145 @@ class ScannerAPIClient:
         except Exception as e:
             return {"error": str(e)}
 
+    # -------------------------------------------------------------------------
+    # PHASE 6: AUTOMATED REMEDIATION ASSISTANT
+    # -------------------------------------------------------------------------
+    def initiate_remediation(self, finding_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Start remediation workflow for a finding."""
+        try:
+            payload = {"finding_id": finding_id, "workspace_root": workspace_root}
+            with httpx.Client(timeout=30.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/findings/{finding_id}", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def get_remediation(self, remediation_id: str) -> Dict[str, Any]:
+        """Get status of an ongoing or completed remediation."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{self.api_v1}/remediations/{remediation_id}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def generate_fix(self, remediation_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Generate or regenerate patch for a remediation."""
+        try:
+            params = f"?workspace_root={workspace_root}" if workspace_root else ""
+            with httpx.Client(timeout=60.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/{remediation_id}/generate-fix{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def get_patch(self, patch_id: str) -> Dict[str, Any]:
+        """Fetch patch details and diffs."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{self.api_v1}/remediations/patches/{patch_id}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def validate_patch(self, patch_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Validate patch safety and file hashes."""
+        try:
+            params = f"?workspace_root={workspace_root}" if workspace_root else ""
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/patches/{patch_id}/validate{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def approve_patch(self, patch_id: str, reason: str = "") -> Dict[str, Any]:
+        """Approve proposed patch."""
+        try:
+            payload = {"decision": "APPROVED", "reason": reason}
+            with httpx.Client(timeout=10.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/patches/{patch_id}/approve", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def reject_patch(self, patch_id: str, reason: str = "") -> Dict[str, Any]:
+        """Reject proposed patch."""
+        try:
+            payload = {"decision": "REJECTED", "reason": reason}
+            with httpx.Client(timeout=10.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/patches/{patch_id}/reject", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def apply_patch(self, patch_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Apply approved patch in controlled workspace."""
+        try:
+            payload = {"workspace_root": workspace_root}
+            with httpx.Client(timeout=30.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/patches/{patch_id}/apply", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def verify_remediation(self, remediation_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Execute validation tests and retest vulnerability."""
+        try:
+            params = f"?workspace_root={workspace_root}" if workspace_root else ""
+            with httpx.Client(timeout=60.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/{remediation_id}/verify{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def rollback_remediation(self, remediation_id: str, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Rollback applied patch."""
+        try:
+            params = f"?workspace_root={workspace_root}" if workspace_root else ""
+            with httpx.Client(timeout=30.0) as client:
+                res = client.post(f"{self.api_v1}/remediations/{remediation_id}/rollback{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def list_remediation_history(
+        self,
+        project_id: str,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """List remediation history for a project."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(
+                    f"{self.api_v1}/remediations/projects/{project_id}/history?skip={skip}&limit={limit}"
+                )
+                if res.status_code == 200:
+                    return res.json()
+                return {"total": 0, "items": []}
+        except Exception:
+            return {"total": 0, "items": []}
+
+
 
 
