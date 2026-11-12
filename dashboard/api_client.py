@@ -444,4 +444,139 @@ class ScannerAPIClient:
         except Exception as e:
             return {"error": str(e)}
 
+    # -------------------------------------------------------------------------
+    # AI SECURITY COPILOT
+    # -------------------------------------------------------------------------
+    def create_copilot_conversation(
+        self,
+        title: str = "New Security Conversation",
+        project_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new conversational session with the Copilot."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                payload = {"title": title, "project_id": project_id}
+                res = client.post(f"{self.api_v1}/copilot/conversations", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def list_copilot_conversations(
+        self,
+        project_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """List active Copilot conversations."""
+        try:
+            params = f"skip={skip}&limit={limit}"
+            if project_id:
+                params += f"&project_id={project_id}"
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(f"{self.api_v1}/copilot/conversations?{params}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def delete_copilot_conversation(self, conversation_id: str) -> Dict[str, Any]:
+        """Delete a conversation session."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.delete(f"{self.api_v1}/copilot/conversations/{conversation_id}")
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def send_copilot_message(
+        self,
+        conversation_id: str,
+        content: str,
+        project_id: Optional[str] = None,
+        finding_id: Optional[str] = None,
+        scan_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send a prompt to the Copilot and receive assistant response."""
+        try:
+            payload = {
+                "content": content,
+                "project_id": project_id,
+                "finding_id": finding_id,
+                "scan_id": scan_id,
+            }
+            with httpx.Client(timeout=60.0) as client:
+                res = client.post(
+                    f"{self.api_v1}/copilot/conversations/{conversation_id}/messages",
+                    json=payload,
+                )
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def list_copilot_messages(
+        self,
+        conversation_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List message history for a conversation."""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(
+                    f"{self.api_v1}/copilot/conversations/{conversation_id}/messages?skip={skip}&limit={limit}"
+                )
+                if res.status_code == 200:
+                    return res.json()
+                return []
+        except Exception:
+            return []
+
+    def copilot_explain_finding(
+        self,
+        finding_id: str,
+        user_query: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Request one-click structured vulnerability explanation from Copilot."""
+        try:
+            payload = {"finding_id": finding_id, "user_query": user_query}
+            with httpx.Client(timeout=30.0) as client:
+                res = client.post(
+                    f"{self.api_v1}/copilot/explain-finding/{finding_id}",
+                    json=payload,
+                )
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def copilot_compare_scans(
+        self,
+        scan_id_a: str,
+        scan_id_b: str,
+        project_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Request differential scan comparison from Copilot."""
+        try:
+            payload = {
+                "scan_id_a": scan_id_a,
+                "scan_id_b": scan_id_b,
+                "project_id": project_id,
+            }
+            with httpx.Client(timeout=30.0) as client:
+                res = client.post(f"{self.api_v1}/copilot/compare-scans", json=payload)
+                if res.status_code == 200:
+                    return res.json()
+                return {"error": res.json().get("detail", res.text)}
+        except Exception as e:
+            return {"error": str(e)}
+
+
 

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.api.copilot import router as copilot_router
 from app.api.datasets import router as datasets_router
 from app.api.detection import router as detection_router
 from app.api.findings import router as findings_router
@@ -21,3 +22,5 @@ api_router.include_router(findings_router)
 api_router.include_router(demo_rag_router)
 api_router.include_router(datasets_router)
 api_router.include_router(projects_router)
+api_router.include_router(copilot_router)
+

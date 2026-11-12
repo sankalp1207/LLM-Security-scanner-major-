@@ -261,6 +261,7 @@ class Project(Base):
         cascade="all, delete-orphan",
     )
     scans = relationship("Scan", back_populates="project")
+    copilot_conversations = relationship("CopilotConversation", back_populates="project", cascade="all, delete-orphan")
 
 
 class TargetConfiguration(Base):
@@ -317,3 +318,59 @@ class UserOnboarding(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class CopilotConversation(Base):
+    """Database model for persistent AI Security Copilot chat sessions."""
+
+    __tablename__ = "copilot_conversations"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    user_id = Column(String(64), default="default_user", nullable=False, index=True)
+    project_id = Column(String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(255), default="New Security Conversation", nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="copilot_conversations")
+    messages = relationship(
+        "CopilotMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="CopilotMessage.created_at.asc()",
+    )
+
+
+class CopilotMessage(Base):
+    """Database model for individual user and assistant messages in a Copilot conversation."""
+
+    __tablename__ = "copilot_messages"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    conversation_id = Column(
+        String(64), ForeignKey("copilot_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role = Column(String(32), nullable=False)  # "user", "assistant", "system"
+    content = Column(Text, nullable=False)
+    referenced_evidence_ids = Column(JSON, default=dict, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    conversation = relationship("CopilotConversation", back_populates="messages")
+

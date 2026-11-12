@@ -7,6 +7,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database.models import (
+    CopilotConversation,
+    CopilotMessage,
     Finding,
     ModelEvaluation,
     Project,
@@ -982,5 +984,155 @@ class ScanEventRepository:
     def count_events(db: Session, scan_id: str) -> int:
         """Count total events for a scan."""
         return db.query(func.count(ScanEvent.id)).filter(ScanEvent.scan_id == scan_id).scalar() or 0
+
+
+class CopilotRepository:
+    """Repository managing persistent AI Security Copilot conversation and message storage."""
+
+    @staticmethod
+    def create_conversation(
+        db: Session,
+        user_id: str = "default_user",
+        project_id: Optional[str] = None,
+        title: str = "New Security Conversation",
+    ) -> CopilotConversation:
+        """Create and persist a new Copilot chat conversation session."""
+        now = datetime.now(timezone.utc)
+        conversation = CopilotConversation(
+            user_id=user_id,
+            project_id=project_id,
+            title=title.strip() if title else "New Security Conversation",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+        return conversation
+
+    @staticmethod
+    def get_conversation(
+        db: Session,
+        conversation_id: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[CopilotConversation]:
+        """Fetch a conversation by ID, enforcing user identity boundary when provided."""
+        q = db.query(CopilotConversation).filter(CopilotConversation.id == conversation_id)
+        if user_id:
+            q = q.filter(CopilotConversation.user_id == user_id)
+        return q.first()
+
+    @staticmethod
+    def list_conversations(
+        db: Session,
+        user_id: str = "default_user",
+        project_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> List[CopilotConversation]:
+        """List conversations belonging to a user, optionally filtered by project workspace."""
+        q = db.query(CopilotConversation).filter(CopilotConversation.user_id == user_id)
+        if project_id:
+            q = q.filter(CopilotConversation.project_id == project_id)
+        return q.order_by(CopilotConversation.updated_at.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def count_conversations(
+        db: Session,
+        user_id: str = "default_user",
+        project_id: Optional[str] = None,
+    ) -> int:
+        """Count total conversations for a user."""
+        q = db.query(func.count(CopilotConversation.id)).filter(CopilotConversation.user_id == user_id)
+        if project_id:
+            q = q.filter(CopilotConversation.project_id == project_id)
+        return q.scalar() or 0
+
+    @staticmethod
+    def update_conversation_title(
+        db: Session,
+        conversation_id: str,
+        title: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[CopilotConversation]:
+        """Update conversation title."""
+        conv = CopilotRepository.get_conversation(db, conversation_id=conversation_id, user_id=user_id)
+        if not conv:
+            return None
+        conv.title = title.strip()
+        conv.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(conv)
+        return conv
+
+    @staticmethod
+    def delete_conversation(
+        db: Session,
+        conversation_id: str,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """Delete a conversation and all cascaded messages."""
+        conv = CopilotRepository.get_conversation(db, conversation_id=conversation_id, user_id=user_id)
+        if not conv:
+            return False
+        db.delete(conv)
+        db.commit()
+        return True
+
+    @staticmethod
+    def add_message(
+        db: Session,
+        conversation_id: str,
+        role: str,
+        content: str,
+        referenced_evidence_ids: Optional[dict] = None,
+    ) -> CopilotMessage:
+        """Append an individual user or assistant message to a conversation."""
+        now = datetime.now(timezone.utc)
+        message = CopilotMessage(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            referenced_evidence_ids=referenced_evidence_ids or {},
+            created_at=now,
+        )
+        db.add(message)
+
+        # Update parent conversation updated_at
+        conv = db.query(CopilotConversation).filter(CopilotConversation.id == conversation_id).first()
+        if conv:
+            conv.updated_at = now
+
+        db.commit()
+        db.refresh(message)
+        return message
+
+    @staticmethod
+    def list_messages(
+        db: Session,
+        conversation_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[CopilotMessage]:
+        """Retrieve chronological messages for a conversation session."""
+        return (
+            db.query(CopilotMessage)
+            .filter(CopilotMessage.conversation_id == conversation_id)
+            .order_by(CopilotMessage.created_at.asc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def count_messages(db: Session, conversation_id: str) -> int:
+        """Count total messages in a conversation."""
+        return (
+            db.query(func.count(CopilotMessage.id))
+            .filter(CopilotMessage.conversation_id == conversation_id)
+            .scalar()
+            or 0
+        )
+
 
 

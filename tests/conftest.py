@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings, get_settings
-from app.database.connection import init_db
+from app.database.connection import SessionLocal, init_db
 from app.main import app
 
 
@@ -13,6 +13,16 @@ from app.main import app
 def setup_test_db():
     """Ensure all database models and tables are initialized for testing."""
     init_db()
+
+
+@pytest.fixture
+def db_session():
+    """Provide a scoped database session for test execution."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @pytest.fixture

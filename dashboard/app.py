@@ -1019,13 +1019,19 @@ elif page == "🚀 Security Scanner":
                                     Category: <code>{cat_label}</code> | Affected Test Case: <code>{f.get('affected_test_case', '')}</code>
                                 </div>
                                 <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 6px;">{f.get('description', '')}</div>
-                                <div style="font-size: 0.8rem; color: #a78bfa; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px;">
+                                <div style="font-size: 0.8rem; color: #a78bfa; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; margin-bottom: 8px;">
                                     💡 <strong>Remediation:</strong> {f.get('remediation', '')}
                                 </div>
                             </div>
                             """,
                             unsafe_allow_html=True,
                         )
+                        if st.button("🧠 Explain Finding with AI Copilot", key=f"live_ai_exp_{f['id']}", use_container_width=True):
+                            st.session_state["copilot_attached_finding_id"] = f["id"]
+                            st.session_state["copilot_attached_finding_title"] = f.get("title", "")
+                            st.session_state["copilot_query_trigger"] = f"Explain vulnerability finding '{f['id']}': {f.get('title', '')} detected in live scan."
+                            st.session_state["page"] = "🧠 AI Security Copilot"
+                            st.rerun()
 
             with tab_events:
                 events_resp = api.get_scan_events(active_scan_id, since_seq=0, limit=200)
@@ -1153,10 +1159,19 @@ elif page == "🚀 Security Scanner":
                             if f.get("remediation"):
                                 st.markdown(f"**🛡️ Remediation:** {f['remediation']}")
 
-                            if st.button("🧪 Retest Vulnerability Mitigation", key=f"retest_{f['id']}"):
-                                with st.spinner("Retesting payload against defensive guardrails..."):
-                                    retest_res = api.retest_finding(f["id"])
-                                    st.success(f"Retest Result: `{retest_res.get('retest_status')}`")
+                            btn_f1, btn_f2 = st.columns([1, 1])
+                            with btn_f1:
+                                if st.button("🧪 Retest Mitigation", key=f"retest_{f['id']}", use_container_width=True):
+                                    with st.spinner("Retesting payload against defensive guardrails..."):
+                                        retest_res = api.retest_finding(f["id"])
+                                        st.success(f"Retest Result: `{retest_res.get('retest_status')}`")
+                                        st.rerun()
+                            with btn_f2:
+                                if st.button("🧠 Explain with AI Copilot", key=f"ai_exp_{f['id']}", use_container_width=True):
+                                    st.session_state["copilot_attached_finding_id"] = f["id"]
+                                    st.session_state["copilot_attached_finding_title"] = f.get("title", "")
+                                    st.session_state["copilot_query_trigger"] = f"Explain vulnerability finding '{f['id']}': {f.get('title', '')}. Analyze the root cause and provide actionable code remediation."
+                                    st.session_state["page"] = "🧠 AI Security Copilot"
                                     st.rerun()
 
             with tab_telemetry:
@@ -1668,17 +1683,26 @@ elif page == "🔍 Vulnerabilities":
                 st.markdown("#### Captured Telemetry Evidence")
                 st.json(f.get("evidence", {}))
 
-                if st.button(f"🔄 Retest Finding {f['id'][:8]}", key=f"retest_btn_{f['id']}"):
-                    with st.spinner("Retesting vulnerability mitigation against target..."):
-                        retest_res = api.retest_finding(f["id"])
-                        if "error" in retest_res:
-                            st.error(f"Retest failed: {retest_res['error']}")
-                        else:
-                            if retest_res.get("retest_status") == "RETEST_PASSED":
-                                st.success(f"✅ {retest_res.get('message', 'Vulnerability resolved.')}")
+                btn_v1, btn_v2 = st.columns([1, 1])
+                with btn_v1:
+                    if st.button(f"🔄 Retest Finding {f['id'][:8]}", key=f"retest_btn_{f['id']}", use_container_width=True):
+                        with st.spinner("Retesting vulnerability mitigation against target..."):
+                            retest_res = api.retest_finding(f["id"])
+                            if "error" in retest_res:
+                                st.error(f"Retest failed: {retest_res['error']}")
                             else:
-                                st.error(f"❌ {retest_res.get('message', 'Vulnerability still present.')}")
-                            st.rerun()
+                                if retest_res.get("retest_status") == "RETEST_PASSED":
+                                    st.success(f"✅ {retest_res.get('message', 'Vulnerability resolved.')}")
+                                else:
+                                    st.error(f"❌ {retest_res.get('message', 'Vulnerability still present.')}")
+                                st.rerun()
+                with btn_v2:
+                    if st.button("🧠 Explain with AI Copilot", key=f"copilot_exp_v_{f['id']}", use_container_width=True):
+                        st.session_state["copilot_attached_finding_id"] = f["id"]
+                        st.session_state["copilot_attached_finding_title"] = f.get("title", "")
+                        st.session_state["copilot_query_trigger"] = f"Explain vulnerability finding '{f['id']}': {f.get('title', '')}. Analyze the root cause and provide actionable code remediation."
+                        st.session_state["page"] = "🧠 AI Security Copilot"
+                        st.rerun()
 
 
 # =============================================================================
@@ -1860,12 +1884,218 @@ elif page == "📜 Security History":
 # =============================================================================
 elif page == "🧠 AI Security Copilot":
     render_header(
-        "AI Security Copilot & Threat Classifier",
-        "Baseline machine learning evaluation metrics, false-positive benchmarking, and real-time inference sandbox.",
-        badge="ML Intelligence",
+        "AI Security Copilot",
+        "Context-aware AI cybersecurity assistant for vulnerability investigation, scan comparison, and evidence-grounded remediation.",
+        badge="Copilot v1.0",
     )
 
-    tab_eval, tab_sandbox = st.tabs(["📊 ML Model Performance", "⚡ Real-Time Detection Sandbox"])
+    tab_chat, tab_eval, tab_sandbox = st.tabs([
+        "💬 Copilot Assistant",
+        "📊 ML Model Performance",
+        "⚡ Threat Detection Sandbox",
+    ])
+
+    with tab_chat:
+        # 1. Project Context Resolution
+        proj_list = api.list_projects().get("items", [])
+        proj_dict = {p["id"]: p["name"] for p in proj_list}
+
+        # Handle prefill context from finding "Explain with AI" actions
+        attached_finding_id = st.session_state.get("copilot_attached_finding_id")
+        attached_finding_title = st.session_state.get("copilot_attached_finding_title", "")
+
+        c_col_side, c_col_main = st.columns([1, 3])
+
+        # ---------------------------------------------------------------------
+        # LEFT COLUMN: CONVERSATION SESSIONS & SCOPE
+        # ---------------------------------------------------------------------
+        with c_col_side:
+            st.markdown("#### 📁 Scope Context")
+            proj_options = ["Global / All Projects"] + list(proj_dict.values())
+            curr_proj_name = st.session_state.get("active_project_name", "Global / All Projects")
+            sel_idx = proj_options.index(curr_proj_name) if curr_proj_name in proj_options else 0
+            selected_proj_label = st.selectbox(
+                "Active Project",
+                options=proj_options,
+                index=sel_idx,
+                key="copilot_proj_select",
+                help="Scoped project from which Copilot will retrieve scan telemetry and findings",
+            )
+            selected_proj_id = None
+            if selected_proj_label != "Global / All Projects":
+                for p_id, p_name in proj_dict.items():
+                    if p_name == selected_proj_label:
+                        selected_proj_id = p_id
+                        break
+
+            if attached_finding_id:
+                st.markdown(
+                    f"""
+                    <div style="background: rgba(139, 92, 246, 0.15); border: 1px solid #8b5cf6; border-radius: 8px; padding: 10px; margin-top: 10px; margin-bottom: 12px; font-size: 0.8rem;">
+                        <div style="font-weight: 700; color: #c4b5fd;">🎯 Context Finding Attached</div>
+                        <div style="color: #cbd5e1; margin-top: 2px;">{attached_finding_title or attached_finding_id}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if st.button("Clear Finding Context", key="clear_finding_ctx", use_container_width=True):
+                    st.session_state.pop("copilot_attached_finding_id", None)
+                    st.session_state.pop("copilot_attached_finding_title", None)
+                    st.rerun()
+
+            st.divider()
+            st.markdown("#### 💬 Chat Sessions")
+            if st.button("➕ New Conversation", type="primary", use_container_width=True):
+                new_conv = api.create_copilot_conversation(
+                    title="New Security Conversation",
+                    project_id=selected_proj_id,
+                )
+                if "id" in new_conv:
+                    st.session_state["active_copilot_conv_id"] = new_conv["id"]
+                    st.rerun()
+
+            conv_list_resp = api.list_copilot_conversations(project_id=selected_proj_id)
+            conv_items = conv_list_resp.get("items", [])
+
+            active_conv_id = st.session_state.get("active_copilot_conv_id")
+            if not active_conv_id and conv_items:
+                active_conv_id = conv_items[0]["id"]
+                st.session_state["active_copilot_conv_id"] = active_conv_id
+
+            if not conv_items:
+                st.caption("No previous sessions. Start a new conversation.")
+            else:
+                conv_map = {c["id"]: c["title"] for c in conv_items}
+                conv_ids = list(conv_map.keys())
+                conv_idx = conv_ids.index(active_conv_id) if active_conv_id in conv_ids else 0
+                chosen_conv_id = st.radio(
+                    "Select Session",
+                    options=conv_ids,
+                    format_func=lambda x: f"💬 {conv_map.get(x, 'Conversation')[:30]}",
+                    index=conv_idx,
+                    key="copilot_session_radio",
+                    label_visibility="collapsed",
+                )
+                if chosen_conv_id != active_conv_id:
+                    st.session_state["active_copilot_conv_id"] = chosen_conv_id
+                    st.rerun()
+
+                if active_conv_id:
+                    if st.button("🗑️ Delete Session", key=f"del_conv_{active_conv_id}", use_container_width=True):
+                        api.delete_copilot_conversation(active_conv_id)
+                        st.session_state.pop("active_copilot_conv_id", None)
+                        st.rerun()
+
+        # ---------------------------------------------------------------------
+        # RIGHT COLUMN: CONVERSATION PANEL & INTERACTIVE INTELLIGENCE
+        # ---------------------------------------------------------------------
+        with c_col_main:
+            # Context Indicator Banner
+            proj_badge_text = selected_proj_label
+            st.markdown(
+                f"""
+                <div style="background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 1.2rem;">🛡️</span>
+                        <div>
+                            <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">AI Security Operations Copilot</div>
+                            <div style="font-size: 0.75rem; color: #94a3b8;">Deterministic Evidence-Grounded Engine • Zero Hallucination Mode</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span style="background: rgba(139, 92, 246, 0.15); border: 1px solid #8b5cf6; color: #c4b5fd; padding: 3px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">📁 {proj_badge_text}</span>
+                        <span style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #6ee7b7; padding: 3px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">⚡ Ready</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Ensure an active conversation exists
+            if not active_conv_id:
+                new_conv = api.create_copilot_conversation(
+                    title="New Security Conversation",
+                    project_id=selected_proj_id,
+                )
+                active_conv_id = new_conv.get("id")
+                st.session_state["active_copilot_conv_id"] = active_conv_id
+
+            # Suggested Prompts Row
+            st.markdown("<div style='font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;'>💡 Suggested Investigations:</div>", unsafe_allow_html=True)
+            sp_col1, sp_col2, sp_col3, sp_col4 = st.columns(4)
+            chosen_prompt = None
+
+            if sp_col1.button("🔍 Explain Latest Scan", use_container_width=True):
+                chosen_prompt = "Explain my latest scan results, total test count, and failure breakdown."
+            if sp_col2.button("🚨 Critical Findings", use_container_width=True):
+                chosen_prompt = "What are the most critical vulnerabilities detected in my project and their root causes?"
+            if sp_col3.button("⚖️ Compare Last 2 Scans", use_container_width=True):
+                chosen_prompt = "Compare my last two security scans and report any newly introduced regressions or resolved issues."
+            if sp_col4.button("🕸️ Map Attack Paths", use_container_width=True):
+                chosen_prompt = "Correlate my project findings into a multi-stage attack execution path."
+
+            # Check if query was triggered via contextual button
+            prefilled_query = st.session_state.pop("copilot_query_trigger", None)
+            if prefilled_query:
+                chosen_prompt = prefilled_query
+
+            # Message History Display
+            messages = api.list_copilot_messages(active_conv_id, limit=100) if active_conv_id else []
+
+            if not messages:
+                empty_state(
+                    "Start Your Security Investigation",
+                    "Ask the Copilot to analyze your latest security scan, explain observed vulnerabilities, compare historical runs, or recommend fixes.",
+                    icon="🧠",
+                )
+            else:
+                for msg in messages:
+                    role = msg.get("role", "assistant")
+                    content = msg.get("content", "")
+                    ts = msg.get("created_at", "")[11:19]
+                    if role == "user":
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; margin-left: 10%;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <span style="font-weight: 700; color: #a5b4fc; font-size: 0.85rem;">👤 Developer / Security Engineer</span>
+                                    <span style="font-size: 0.72rem; color: #64748b;">{ts}</span>
+                                </div>
+                                <div style="color: #f1f5f9; font-size: 0.92rem; line-height: 1.5;">{content}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"""
+                            <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-left: 4px solid #8b5cf6; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; margin-right: 5%;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-weight: 700; color: #c4b5fd; font-size: 0.85rem;">🛡️ AI Security Copilot</span>
+                                    <span style="font-size: 0.72rem; color: #64748b;">{ts}</span>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(content)
+
+            # Chat Input Field
+            user_input = st.chat_input("Ask Copilot about vulnerabilities, scan diffs, or remediation...")
+            prompt_to_send = chosen_prompt or user_input
+
+            if prompt_to_send:
+                with st.spinner("Copilot is analyzing evidence, verifying test telemetry, and assembling advisory..."):
+                    resp = api.send_copilot_message(
+                        conversation_id=active_conv_id,
+                        content=prompt_to_send,
+                        project_id=selected_proj_id,
+                        finding_id=attached_finding_id,
+                    )
+                    if "error" in resp:
+                        st.error(f"Copilot error: {resp['error']}")
+                    else:
+                        st.rerun()
 
     with tab_eval:
         from app.database.connection import SessionLocal
