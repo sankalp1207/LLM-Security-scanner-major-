@@ -220,3 +220,124 @@ def test_remediation_project_history(client: TestClient, db_session: Session):
     assert h_data["total"] >= 1
     assert h_data["items"][0]["finding_id"] == finding.id
 
+
+def test_patch_rejection_prevents_file_modification(
+    client: TestClient, db_session: Session, tmp_path: Path
+):
+    """Verify that rejected patches are never applied to workspace files."""
+    user_id = f"rem_rej_{uuid.uuid4().hex[:8]}"
+    headers = {"x-user-id": user_id}
+
+    ws_dir = tmp_path / "reject_repo"
+    ws_dir.mkdir()
+    target_abs = ws_dir / "app" / "demo_rag" / "routes.py"
+    target_abs.parent.mkdir(parents=True, exist_ok=True)
+    orig_code = 'demo_state = {"vulnerable_mode": True}\n'
+    target_abs.write_text(orig_code, encoding="utf-8")
+
+    scan = ScanRepository.create_scan(
+        db=db_session,
+        target_identifier="http://testserver/api/v1/demo-rag/query",
+        configuration={"preset": "quick_scan"},
+        user_id=user_id,
+        preset="quick_scan",
+        status="COMPLETED",
+    )
+    finding = FindingRepository.create_finding(
+        db=db_session,
+        scan_id=scan.id,
+        category="prompt_injection",
+        severity="HIGH",
+        title="Injection Bypass",
+        description="Test finding",
+        evidence={},
+        affected_test_case="direct_03",
+        target_component="app/demo_rag/routes.py",
+    )
+
+    init_res = client.post(
+        f"/api/v1/remediations/findings/{finding.id}",
+        json={"workspace_root": str(ws_dir)},
+        headers=headers,
+    )
+    patch_id = init_res.json()["latest_patch_id"]
+
+    # Explicit rejection
+    rej_res = client.post(
+        f"/api/v1/remediations/patches/{patch_id}/reject",
+        json={"reason": "Contains undesirable behavioral changes"},
+        headers=headers,
+    )
+    assert rej_res.status_code == 200
+    assert rej_res.json()["decision"] == "REJECTED"
+
+    # Attempt to apply rejected patch
+    apply_res = client.post(
+        f"/api/v1/remediations/patches/{patch_id}/apply",
+        json={"workspace_root": str(ws_dir)},
+        headers=headers,
+    )
+    assert apply_res.status_code == 400
+    assert "approved" in apply_res.json()["detail"].lower()
+
+    # Confirm file on disk was not modified
+    assert target_abs.read_text(encoding="utf-8") == orig_code
+
+
+def test_stale_patch_rejection_on_source_file_drift(
+    client: TestClient, db_session: Session, tmp_path: Path
+):
+    """Verify that if source files change on disk after patch generation, patch application is rejected."""
+    user_id = f"rem_drift_{uuid.uuid4().hex[:8]}"
+    headers = {"x-user-id": user_id}
+
+    ws_dir = tmp_path / "drift_repo"
+    ws_dir.mkdir()
+    target_abs = ws_dir / "app" / "demo_rag" / "routes.py"
+    target_abs.parent.mkdir(parents=True, exist_ok=True)
+    orig_code = 'demo_state = {"vulnerable_mode": True}\n'
+    target_abs.write_text(orig_code, encoding="utf-8")
+
+    scan = ScanRepository.create_scan(
+        db=db_session,
+        target_identifier="http://testserver/api/v1/demo-rag/query",
+        configuration={"preset": "quick_scan"},
+        user_id=user_id,
+        preset="quick_scan",
+        status="COMPLETED",
+    )
+    finding = FindingRepository.create_finding(
+        db=db_session,
+        scan_id=scan.id,
+        category="prompt_injection",
+        severity="HIGH",
+        title="Drift Test Finding",
+        description="Test finding",
+        evidence={},
+        affected_test_case="direct_04",
+        target_component="app/demo_rag/routes.py",
+    )
+
+    init_res = client.post(
+        f"/api/v1/remediations/findings/{finding.id}",
+        json={"workspace_root": str(ws_dir)},
+        headers=headers,
+    )
+    patch_id = init_res.json()["latest_patch_id"]
+
+    # Approve patch
+    client.post(f"/api/v1/remediations/patches/{patch_id}/approve", headers=headers)
+
+    # Concurrently modify source file on disk before application (Drift)
+    target_abs.write_text('demo_state = {"vulnerable_mode": True, "concurrent_edit": True}\n', encoding="utf-8")
+
+    # Attempt to apply patch -> Must be rejected due to stale hash
+    apply_res = client.post(
+        f"/api/v1/remediations/patches/{patch_id}/apply",
+        json={"workspace_root": str(ws_dir)},
+        headers=headers,
+    )
+    assert apply_res.status_code == 400
+    assert "validation failure" in apply_res.json()["detail"].lower()
+
+

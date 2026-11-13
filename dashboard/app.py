@@ -1,5 +1,13 @@
 """LLM Security Scanner — Premium AI Cybersecurity Operations Platform (Streamlit)."""
 
+import sys
+from pathlib import Path
+
+# Ensure root repository workspace is in sys.path for reliable module resolution
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
 from datetime import datetime, timezone
 import json
 import time

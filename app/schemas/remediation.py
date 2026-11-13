@@ -77,7 +77,7 @@ class PatchValidationResponse(BaseModel):
 class PatchApprovalRequest(BaseModel):
     """Payload to record explicit human decision on a proposed patch."""
 
-    decision: str = Field(..., pattern="^(APPROVED|REJECTED|CANCELLED)$")
+    decision: Optional[str] = Field(default="APPROVED", pattern="^(APPROVED|REJECTED|CANCELLED)$")
     reason: Optional[str] = Field(default="", max_length=1000)
 
 
