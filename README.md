@@ -4,6 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-FF4B4B.svg)](https://streamlit.io)
+[![Android APK](https://img.shields.io/badge/Android%20APK-Download%20v1.0.0-success.svg?logo=android)](https://github.com/sankalp1207/LLM-Security-scanner-major-/raw/main/app-debug.apk)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 An end-to-end, reproducible security auditing and automated red-teaming platform designed for evaluating, detecting, and defending Large Language Model (LLM) powered systems against adversarial manipulation, data leakage, and system vulnerabilities.

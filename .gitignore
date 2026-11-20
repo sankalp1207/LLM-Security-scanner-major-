@@ -43,5 +43,7 @@ desktop.ini
 .vscode/
 *.swp
 
+# APK builds (allow root release apk for direct download)
 *.apk
+!app-debug.apk
 
