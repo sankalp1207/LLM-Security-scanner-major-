@@ -1,20 +1,21 @@
 """Central Remediation Service orchestrating analysis, fix generation, validation, approval, application, testing, and retesting."""
 
 import asyncio
-import os
+import re
+import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.database.models import Finding, Project, Remediation, RemediationPatch
+from app.database.models import Finding, Remediation, RemediationPatch
 from app.database.repository import (
     FindingRepository,
     ProjectRepository,
     RemediationRepository,
-    ScanRepository,
 )
 from app.schemas.remediation import (
     PatchApplyResponse,
@@ -41,6 +42,71 @@ class RemediationServiceError(Exception):
 
 class RemediationService:
     """Orchestrates the 10-stage end-to-end vulnerability remediation lifecycle."""
+
+    @staticmethod
+    def classify_verification_outcome(
+        retest_status: str,
+        tests_executed: int,
+        tests_failed: int,
+        exit_code: Optional[int],
+    ) -> str:
+        """Classify verification only when real tests and a conclusive retest exist."""
+        if tests_failed > 0:
+            return "REGRESSION_DETECTED"
+        if tests_executed <= 0 or exit_code != 0 or retest_status == "RETEST_INCONCLUSIVE":
+            return "INCONCLUSIVE"
+        if retest_status == "RETEST_PASSED":
+            return "FIXED"
+        if retest_status == "RETEST_FAILED":
+            return "NOT_FIXED"
+        return "PARTIALLY_FIXED"
+
+    @staticmethod
+    async def _run_workspace_tests(workspace: Path) -> Dict[str, Any]:
+        """Run pytest in the approved workspace and summarize its actual result."""
+        started = time.perf_counter()
+        try:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pytest", "-q", "--disable-warnings",
+                cwd=str(workspace),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            output_bytes, _ = await asyncio.wait_for(process.communicate(), timeout=120)
+            output = output_bytes.decode("utf-8", errors="replace")
+            counts = {name: 0 for name in ("passed", "failed", "error", "skipped", "xfailed", "xpassed")}
+            for count, label in re.findall(
+                r"\b(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)\b", output
+            ):
+                normalized = "error" if label.startswith("error") else label
+                counts[normalized] += int(count)
+            executed = sum(counts.values())
+            return {
+                "test_runner": "pytest",
+                "tests_executed": executed,
+                "tests_passed": counts["passed"] + counts["xpassed"],
+                "tests_failed": counts["failed"] + counts["error"],
+                "tests_skipped": counts["skipped"] + counts["xfailed"],
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                "exit_code": process.returncode,
+                "output_tail": output[-2000:],
+            }
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return {
+                "test_runner": "pytest", "tests_executed": 0, "tests_passed": 0,
+                "tests_failed": 0, "tests_skipped": 0,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                "exit_code": None, "error": "Workspace tests exceeded the 120 second limit.",
+            }
+        except (OSError, RuntimeError) as exc:
+            return {
+                "test_runner": "pytest", "tests_executed": 0, "tests_passed": 0,
+                "tests_failed": 0, "tests_skipped": 0,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                "exit_code": None, "error": f"Could not run workspace tests: {exc}",
+            }
 
     @classmethod
     def _validate_finding_ownership(cls, db: Session, finding_id: str, user_id: str) -> Finding:
@@ -403,15 +469,9 @@ class RemediationService:
 
         RemediationRepository.update_remediation_status(db, rem.id, "TESTING")
 
-        # 1. Run relevant unit test suite
-        test_summary = {
-            "test_runner": "pytest",
-            "tests_executed": 3,
-            "tests_passed": 3,
-            "tests_failed": 0,
-            "duration_ms": 42.0,
-            "exit_code": 0,
-        }
+        # 1. Run the workspace's real test suite; never substitute synthetic pass counts.
+        ws_path = Path(workspace_root).resolve() if workspace_root else ControlledWorkspace.get_default_workspace_root()
+        test_summary = await cls._run_workspace_tests(ws_path)
 
         # 2. Retest original vulnerability
         try:
@@ -419,21 +479,25 @@ class RemediationService:
             retest_status_raw = retest_result.get("retest_status", "RETEST_FAILED")
             retest_msg = retest_result.get("message", "")
         except Exception as e:
-            retest_status_raw = "RETEST_FAILED"
+            retest_status_raw = "RETEST_INCONCLUSIVE"
             retest_msg = f"Retest execution failed: {str(e)}"
 
         # 3. Determine conclusive outcome
-        if retest_status_raw == "RETEST_PASSED" and test_summary["tests_failed"] == 0:
-            final_status = "FIXED"
+        final_status = cls.classify_verification_outcome(
+            retest_status=retest_status_raw,
+            tests_executed=test_summary["tests_executed"],
+            tests_failed=test_summary["tests_failed"],
+            exit_code=test_summary["exit_code"],
+        )
+        if final_status == "FIXED":
             outcome = "Remediation Verified: Original vulnerability was mitigated and all validation tests passed."
-        elif retest_status_raw == "RETEST_FAILED" and test_summary["tests_failed"] == 0:
-            final_status = "NOT_FIXED"
+        elif final_status == "NOT_FIXED":
             outcome = "Remediation Ineffective: Vulnerability still reproduced during retesting."
-        elif test_summary["tests_failed"] > 0:
-            final_status = "REGRESSION_DETECTED"
-            outcome = "Regression Detected: Vulnerability retest caused test suite failures."
+        elif final_status == "REGRESSION_DETECTED":
+            outcome = "Regression Detected: Workspace validation tests failed after patch application."
+        elif final_status == "INCONCLUSIVE":
+            outcome = "Verification Inconclusive: No conclusive passing test run and vulnerability retest were both available."
         else:
-            final_status = "PARTIALLY_FIXED"
             outcome = "Partially Fixed: Some security indicators improved, but full verification requires further hardening."
 
         completed_at = datetime.now(timezone.utc)

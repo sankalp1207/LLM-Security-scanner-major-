@@ -6,6 +6,7 @@ services:
       - "8000:8000"
     environment:
       - ENVIRONMENT=production
+      - "JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in your environment before starting production containers}"
       - DATABASE_URL=sqlite:///./llm_security_scanner.db
       - HOST=0.0.0.0
       - PORT=8000

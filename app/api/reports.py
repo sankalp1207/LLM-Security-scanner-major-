@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.api.auth import get_current_user_id
 from app.database.repository import FindingRepository, ScanRepository
 from app.reports.export import export_findings_to_csv
 from app.reports.generator import ReportGenerator
@@ -15,10 +16,14 @@ router = APIRouter(prefix="/scans", tags=["Reports"])
 @router.get("/{scan_id}/report", response_model=ScanReportResponse)
 def get_scan_report(
     scan_id: str,
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ScanReportResponse:
     """Generate and return a structured JSON security audit report for a completed scan."""
     try:
+        scan = ScanRepository.get_scan(db, scan_id)
+        if not scan or scan.user_id != user_id:
+            raise HTTPException(status_code=404, detail=f"Scan '{scan_id}' not found.")
         return ReportGenerator.generate_report(db=db, scan_id=scan_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -27,11 +32,12 @@ def get_scan_report(
 @router.get("/{scan_id}/export.csv")
 def export_scan_csv(
     scan_id: str,
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> Response:
     """Export findings for a scan as a sanitized CSV spreadsheet (protected against CSV injection)."""
     scan = ScanRepository.get_scan(db, scan_id)
-    if not scan:
+    if not scan or scan.user_id != user_id:
         raise HTTPException(status_code=404, detail=f"Scan '{scan_id}' not found.")
 
     findings = FindingRepository.list_findings_by_scan(db, scan_id=scan_id)

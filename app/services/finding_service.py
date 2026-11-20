@@ -1,7 +1,7 @@
 """Service managing vulnerability finding review, details, and remediation retesting."""
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -24,6 +24,7 @@ class FindingService:
         category: Optional[str] = None,
         severity: Optional[str] = None,
         retest_status: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> list[Finding]:
         """Retrieve paginated findings across all scans with optional filters."""
         return FindingRepository.list_all_findings(
@@ -33,29 +34,54 @@ class FindingService:
             category=category,
             severity=severity,
             retest_status=retest_status,
+            user_id=user_id,
         )
 
     @staticmethod
-    def get_finding(db: Session, finding_id: str) -> Finding:
+    def get_finding(db: Session, finding_id: str, user_id: Optional[str] = None) -> Finding:
         """Fetch finding by ID or raise 404."""
         finding = FindingRepository.get_finding(db, finding_id)
         if not finding:
             raise HTTPException(status_code=404, detail=f"Finding with ID '{finding_id}' not found.")
+        if user_id is not None:
+            scan = ScanRepository.get_scan(db, finding.scan_id)
+            if not scan or scan.user_id != user_id:
+                raise HTTPException(status_code=404, detail=f"Finding with ID '{finding_id}' not found.")
         return finding
 
     @staticmethod
     def retest_finding(
         db: Session,
         finding_id: str,
+        user_id: Optional[str] = None,
         http_client: Any = None,
     ) -> Dict[str, Any]:
         """Retest a specific vulnerability against the target to verify if mitigation resolved it."""
-        finding = FindingService.get_finding(db, finding_id)
+        finding = FindingService.get_finding(db, finding_id, user_id=user_id)
         scan = ScanRepository.get_scan(db, finding.scan_id)
         if not scan:
             raise HTTPException(status_code=404, detail="Parent scan record not found.")
 
         target_url = scan.target_identifier
+        scan_config = scan.configuration_snapshot or scan.configuration or {}
+        external_authorized = bool(
+            scan_config.get("external_authorized")
+            or scan_config.get("external_target_authorized")
+        )
+        destination = TargetClient.validate_target(
+            target_url, external_authorized=external_authorized
+        )
+        if not destination.is_valid:
+            FindingRepository.update_retest_status(
+                db, finding_id=finding.id, retest_status="RETEST_INCONCLUSIVE"
+            )
+            return {
+                "finding_id": finding.id,
+                "retest_status": "RETEST_INCONCLUSIVE",
+                "message": f"Retest blocked by target safety validation: {destination.error_message}",
+                "response_status": None,
+                "response_snippet": "",
+            }
         test_case_id = finding.affected_test_case
 
         # Extract input text from evidence
@@ -115,8 +141,16 @@ class FindingService:
                 response_text=exec_res.response_text,
             )
 
-        # Determine retest outcome
-        if not recheck.exploit_verified:
+        # A missing, failed, or non-success response cannot prove the vulnerability is fixed.
+        if (
+            exec_res.is_inconclusive
+            or exec_res.error
+            or exec_res.response_status is None
+            or not 200 <= exec_res.response_status < 300
+        ):
+            new_status = "RETEST_INCONCLUSIVE"
+            message = "Retest was inconclusive because the target did not return a successful, usable response."
+        elif not recheck.exploit_verified:
             # Vulnerability has been mitigated!
             new_status = "RETEST_PASSED"
             message = "Remediation verified: test re-executed and vulnerability was no longer observed."

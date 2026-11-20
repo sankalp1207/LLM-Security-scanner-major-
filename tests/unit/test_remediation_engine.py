@@ -14,7 +14,17 @@ from app.database.repository import (
 )
 from app.services.patch_validator import PatchValidator
 from app.services.remediation_library import RemediationLibrary
+from app.services.remediation_service import RemediationService
 from app.services.remediation_workspace import ControlledWorkspace, WorkspaceSecurityError
+
+
+def test_verification_outcome_requires_real_passing_tests_and_conclusive_retest():
+    classify = RemediationService.classify_verification_outcome
+    assert classify("RETEST_PASSED", 2, 0, 0) == "FIXED"
+    assert classify("RETEST_FAILED", 2, 0, 0) == "NOT_FIXED"
+    assert classify("RETEST_PASSED", 0, 0, 5) == "INCONCLUSIVE"
+    assert classify("RETEST_INCONCLUSIVE", 2, 0, 0) == "INCONCLUSIVE"
+    assert classify("RETEST_PASSED", 2, 1, 1) == "REGRESSION_DETECTED"
 
 
 def test_controlled_workspace_path_safety_and_traversal_rejection(tmp_path: Path):

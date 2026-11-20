@@ -79,6 +79,7 @@ The following capabilities are missing or incomplete relative to the project spe
 | **Phase 11: Regression & CI/CD** | No CI workflow | `.github/workflows/ci.yml` missing; no regression detection comparing previous scans against new scans for reopened or newly introduced vulnerabilities. |
 | **Phase 12: Provider Comparison** | Mock generator embedded in Demo RAG | No modular provider adapter interface to compare different models or providers on identical benchmarks (latency, refusal rate, attack success rate). |
 | **Phase 13: Dashboard Enhancements** | Basic 6-page Streamlit dashboard | Lacks pages/views for RAG pipeline stages, Agent tool audits, Mitigation validation comparisons, Attack-path graph, and Security posture scoring. |
+| **Android Client** | Jetpack Compose + Material 3 App (`android/`) | Complete native Kotlin client with MVVM, Retrofit, Room, Keystore AES-256-GCM, SSE live monitoring, and Automated Remediation UI. |
 
 ---
 

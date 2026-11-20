@@ -160,7 +160,7 @@ def test_human_approval_gate_and_controlled_application(
     )
     assert verify_res.status_code == 200
     v_data = verify_res.json()
-    assert v_data["retest_status"] in ("FIXED", "NOT_FIXED", "PARTIALLY_FIXED")
+    assert v_data["retest_status"] in ("FIXED", "NOT_FIXED", "PARTIALLY_FIXED", "INCONCLUSIVE", "REGRESSION_DETECTED")
     assert "test_summary" in v_data
 
     # 7. Rollback applied patch

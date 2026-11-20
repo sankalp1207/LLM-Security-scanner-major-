@@ -32,6 +32,7 @@ def test_sanitize_csv_cell_formula_injection_defense():
     assert sanitize_csv_cell("-2+3") == "'-2+3"
     assert sanitize_csv_cell("@SUM(A1:A10)") == "'@SUM(A1:A10)"
     assert sanitize_csv_cell("\tDDE_ATTACK") == "'\tDDE_ATTACK"
+    assert sanitize_csv_cell("   =HYPERLINK('https://bad.example')") == "'   =HYPERLINK('https://bad.example')"
 
     # Benign text must remain unchanged
     assert sanitize_csv_cell("Direct prompt injection") == "Direct prompt injection"

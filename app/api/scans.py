@@ -2,11 +2,12 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.api.auth import get_current_user_id
 from app.schemas.events import ScanEventListResponse, ScanProgressResponse
 from app.schemas.presets import ScanPresetConfig, list_presets
 from app.schemas.scans import (
@@ -22,11 +23,6 @@ from app.services.scan_service import ScanService
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
 scan_engine_router = APIRouter(prefix="/scan", tags=["Scan Presets"])
-
-
-def get_current_user_id(x_user_id: Optional[str] = Header(None)) -> str:
-    """Extract authenticated user identity or default for development."""
-    return (x_user_id or "default_user").strip()
 
 
 # -----------------------------------------------------------------------------
@@ -45,11 +41,12 @@ def get_presets() -> List[ScanPresetConfig]:
 @router.post("", response_model=ScanResponse)
 def create_scan(
     request: ScanCreateRequest,
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ScanResponse:
     """Validate, create, and execute a security scan against the configured target."""
-    scan = ScanService.create_and_run_scan(db=db, request=request)
-    findings = ScanService.get_findings_for_scan(db=db, scan_id=scan.id)
+    scan = ScanService.create_and_run_scan(db=db, request=request, user_id=user_id)
+    findings = ScanService.get_findings_for_scan(db=db, scan_id=scan.id, user_id=user_id)
     return ScanResponse(
         id=scan.id,
         project_id=scan.project_id,
@@ -80,13 +77,14 @@ def create_scan(
 def list_scans(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ScanListResponse:
     """List recent scan executions with pagination."""
-    scans = ScanService.list_scans(db=db, skip=skip, limit=limit)
+    scans = ScanService.list_scans(db=db, skip=skip, limit=limit, user_id=user_id)
     items = []
     for s in scans:
-        findings = ScanService.get_findings_for_scan(db=db, scan_id=s.id)
+        findings = ScanService.get_findings_for_scan(db=db, scan_id=s.id, user_id=user_id)
         items.append(
             ScanResponse(
                 id=s.id,

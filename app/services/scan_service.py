@@ -306,6 +306,7 @@ class ScanService:
         request: ScanCreateRequest,
         http_client: Any = None,
         sync_execute: bool = True,
+        user_id: str = "default_user",
     ) -> Scan:
         """Legacy direct scan initiation."""
         validation = TargetClient.validate_target(
@@ -330,6 +331,7 @@ class ScanService:
             configuration=config_dict,
             configuration_snapshot=config_dict,
             status="QUEUED",
+            user_id=user_id,
         )
         ScanEventService.publish_event(
             scan_id=scan.id,
@@ -379,8 +381,8 @@ class ScanService:
         if not scan:
             raise HTTPException(status_code=404, detail=f"Scan with ID '{scan_id}' not found.")
 
-        # Check ownership if associated with a project
-        if scan.project and scan.project.owner_id != user_id and scan.user_id != user_id:
+        # Direct scans have no project relation, so always enforce the recorded owner.
+        if scan.user_id != user_id and not (scan.project and scan.project.owner_id == user_id):
             raise HTTPException(status_code=403, detail="Access denied: you do not own this scan.")
 
         if scan.status in ("COMPLETED", "FAILED", "CANCELLED"):
@@ -402,14 +404,16 @@ class ScanService:
         scan = ScanRepository.get_scan(db, scan_id)
         if not scan:
             raise HTTPException(status_code=404, detail=f"Scan with ID '{scan_id}' not found.")
-        if user_id and scan.project and scan.project.owner_id != user_id and scan.user_id != user_id:
+        if user_id and scan.user_id != user_id and not (scan.project and scan.project.owner_id == user_id):
             raise HTTPException(status_code=403, detail="Access denied: you do not own this scan.")
         return scan
 
     @staticmethod
-    def list_scans(db: Session, skip: int = 0, limit: int = 50) -> List[Scan]:
+    def list_scans(
+        db: Session, skip: int = 0, limit: int = 50, user_id: Optional[str] = None
+    ) -> List[Scan]:
         """Fetch paginated scan records."""
-        return ScanRepository.list_scans(db, skip=skip, limit=limit)
+        return ScanRepository.list_scans(db, skip=skip, limit=limit, user_id=user_id)
 
     @staticmethod
     def list_project_scans(

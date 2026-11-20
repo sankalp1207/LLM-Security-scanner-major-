@@ -1,10 +1,11 @@
 """FastAPI route endpoints for Phase 6 Automated Remediation Assistant."""
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.api.auth import get_current_user_id
 from app.schemas.remediation import (
     PatchApplyRequest,
     PatchApplyResponse,
@@ -23,11 +24,6 @@ from app.schemas.remediation import (
 from app.services.remediation_service import RemediationService
 
 router = APIRouter(prefix="/remediations", tags=["Automated Remediation Assistant"])
-
-
-def get_current_user_id(x_user_id: Optional[str] = Header(None)) -> str:
-    """Extract authenticated user identity from header or default."""
-    return (x_user_id or "default_user").strip()
 
 
 @router.post("/findings/{finding_id}", response_model=RemediationResponse)

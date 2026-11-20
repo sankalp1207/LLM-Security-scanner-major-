@@ -1,0 +1,13 @@
+<resources>
+    <color name="cyber_bg">#0B0F17</color>
+    <color name="cyber_surface">#111827</color>
+    <color name="cyber_surface_card">#1F2937</color>
+    <color name="cyber_cyan">#06B6D4</color>
+    <color name="cyber_purple">#8B5CF6</color>
+    <color name="cyber_critical">#EF4444</color>
+    <color name="cyber_high">#F97316</color>
+    <color name="cyber_medium">#F59E0B</color>
+    <color name="cyber_low">#10B981</color>
+    <color name="cyber_text_primary">#F9FAFB</color>
+    <color name="cyber_text_secondary">#9CA3AF</color>
+</resources>

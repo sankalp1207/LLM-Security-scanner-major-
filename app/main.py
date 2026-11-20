@@ -2,10 +2,11 @@
 
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.auth import resolve_user_identity
 from app.api.health import router as health_router
 from app.api.routes import api_router
 from app.config import get_settings
@@ -40,6 +41,28 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @application.middleware("http")
+    async def require_api_identity(request: Request, call_next):
+        """Require a signed identity for every production API route except health checks."""
+        if (
+            settings.ENVIRONMENT.strip().lower() == "production"
+            and request.url.path.startswith(settings.API_V1_STR)
+            and request.url.path not in (f"{settings.API_V1_STR}/health",)
+        ):
+            try:
+                request.state.user_id = resolve_user_identity(
+                    request.headers.get("authorization"),
+                    request.headers.get("x-user-id"),
+                    settings,
+                )
+            except HTTPException as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers=exc.headers,
+                )
+        return await call_next(request)
 
     # Root endpoint
     @application.get("/", tags=["General"])

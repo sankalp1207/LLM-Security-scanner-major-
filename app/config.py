@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
+    JWT_SECRET_KEY: str = ""
 
     # API Info
     API_V1_STR: str = "/api/v1"

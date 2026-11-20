@@ -1,6 +1,7 @@
 """Target client validating destination authorization and executing bounded HTTP requests."""
 
 import ipaddress
+import socket
 import time
 from urllib.parse import urlparse
 
@@ -19,7 +20,7 @@ class TargetClient:
         "instance-data",
     }
 
-    LOCAL_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "testserver"}
+    LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 
     @classmethod
     def validate_target(
@@ -34,7 +35,14 @@ class TargetClient:
                 error_message="Target URL cannot be empty."
             )
 
-        parsed = urlparse(target_url)
+        try:
+            parsed = urlparse(target_url)
+            port = parsed.port
+        except ValueError:
+            return TargetValidationResult(
+                is_valid=False, target_url=target_url, host="", is_local=False,
+                error_message="Invalid target URL or port.",
+            )
         if parsed.scheme not in ("http", "https"):
             return TargetValidationResult(
                 is_valid=False, target_url=target_url, host="", is_local=False,
@@ -47,6 +55,11 @@ class TargetClient:
                 is_valid=False, target_url=target_url, host="", is_local=False,
                 error_message="Invalid target URL: missing hostname."
             )
+        if parsed.username is not None or parsed.password is not None:
+            return TargetValidationResult(
+                is_valid=False, target_url=target_url, host=hostname, is_local=False,
+                error_message="Credentials in target URLs are not permitted.",
+            )
 
         # Cloud metadata protection
         if hostname in cls.PROHIBITED_HOSTS:
@@ -57,29 +70,51 @@ class TargetClient:
 
         is_local = hostname in cls.LOCAL_HOSTS
 
-        # Check if IP address is link-local or multicast
-        try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_link_local or ip.is_multicast or ip.is_reserved:
-                return TargetValidationResult(
-                    is_valid=False, target_url=target_url, host=hostname, is_local=False,
-                    error_message="Requests to reserved or link-local IP addresses are prohibited."
-                )
-            if ip.is_loopback:
-                is_local = True
-        except ValueError:
-            # Not a raw IP address; hostname string
-            pass
-
-        # If non-local target, require explicit authorization acknowledgement
+        # Require explicit authorization before performing DNS lookups or network checks.
         if not is_local and not external_authorized:
             return TargetValidationResult(
                 is_valid=False, target_url=target_url, host=hostname, is_local=False,
                 error_message=(
                     "External target requires explicit authorization acknowledgement. "
                     "Set external_target_authorized=True in scan configuration."
-                )
+                ),
             )
+
+        # Resolve hostnames before authorizing them so private and internal destinations
+        # cannot bypass the policy by using DNS names.
+        try:
+            addresses = [ipaddress.ip_address(hostname)]
+        except ValueError:
+            if is_local:
+                addresses = []
+            else:
+                try:
+                    addresses = [
+                        ipaddress.ip_address(record[4][0])
+                        for record in socket.getaddrinfo(
+                            hostname, port or (443 if parsed.scheme == "https" else 80),
+                            type=socket.SOCK_STREAM,
+                        )
+                    ]
+                except (OSError, ValueError):
+                    return TargetValidationResult(
+                        is_valid=False, target_url=target_url, host=hostname, is_local=False,
+                        error_message="Target hostname could not be safely resolved.",
+                    )
+                if not addresses:
+                    return TargetValidationResult(
+                        is_valid=False, target_url=target_url, host=hostname, is_local=False,
+                        error_message="Target hostname resolved to no addresses.",
+                    )
+
+        for ip in addresses:
+            if ip.is_loopback and is_local:
+                continue
+            if not ip.is_global:
+                return TargetValidationResult(
+                    is_valid=False, target_url=target_url, host=hostname, is_local=False,
+                    error_message=f"Requests to non-public IP addresses are prohibited ({ip}).",
+                )
 
         return TargetValidationResult(
             is_valid=True,

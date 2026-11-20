@@ -8,14 +8,14 @@ from typing import Any, List
 from app.database.models import Finding
 
 # Dangerous prefix characters that spreadsheet software (Excel, Calc, Sheets) interpret as formulas
-DANGEROUS_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "%")
+DANGEROUS_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n", "%")
 
 
 def sanitize_csv_cell(value: Any) -> str:
     """Sanitize cell value against CSV / Spreadsheet Formula Injection (CWE-1236).
 
-    If the string begins with =, +, -, @, tab, or carriage return, it is prefixed with
-    a single quote (') to force spreadsheet software to treat the content as literal text.
+    If the first non-whitespace character is a formula prefix, prefix the original cell
+    with a single quote so leading spaces cannot bypass spreadsheet formula protection.
     """
     if value is None:
         return ""
@@ -24,10 +24,10 @@ def sanitize_csv_cell(value: Any) -> str:
     if not text:
         return ""
 
-    if text.startswith(DANGEROUS_FORMULA_PREFIXES):
+    if text.lstrip(" ").startswith(DANGEROUS_FORMULA_PREFIXES):
         return f"'{text}"
 
-    return text.strip()
+    return text
 
 
 def export_findings_to_csv(findings: List[Finding]) -> str:

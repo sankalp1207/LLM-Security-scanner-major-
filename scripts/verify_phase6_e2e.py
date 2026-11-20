@@ -60,6 +60,16 @@ def run_e2e_verification() -> bool:
             '    return "Vulnerable answer"\n'
         )
         routes_file.write_text(orig_code, encoding="utf-8")
+        test_file = ws_dir / "tests" / "test_patched_routes.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text(
+            "from pathlib import Path\n"
+            "\n"
+            "def test_patch_disables_vulnerable_mode():\n"
+            "    source = Path('app/demo_rag/routes.py').read_text(encoding='utf-8')\n"
+            "    assert '\"vulnerable_mode\": False' in source\n",
+            encoding="utf-8",
+        )
 
         user_owner = "e2e_verified_owner"
         user_intruder = "e2e_unauthorized_user"
@@ -236,27 +246,41 @@ def run_e2e_verification() -> bool:
         )
         assert "test_summary" in verify_res.model_dump(), "Failed: test_summary missing"
         assert verify_res.test_summary.get("tests_executed", 0) > 0
+        assert verify_res.test_summary.get("tests_passed", 0) > 0
+        assert verify_res.test_summary.get("exit_code") == 0
+        assert verify_res.test_summary.get("tests_failed", 0) == 0
         print(f"  -> SUCCESS: Executed validation tests: {verify_res.test_summary}")
 
         # ---------------------------------------------------------------------
         # 11. Retest Original Vulnerability
         # ---------------------------------------------------------------------
         print("\n[CHECK 11] Vulnerability Retesting against Target Endpoint...")
-        assert verify_res.retest_status in ("FIXED", "NOT_FIXED", "PARTIALLY_FIXED")
-        print(f"  -> SUCCESS: Retest verified: Status='{verify_res.retest_status}' ({verify_res.outcome})")
+        expected_outcome = {
+            "FIXED": "Remediation Verified:",
+            "NOT_FIXED": "Remediation Ineffective:",
+            "PARTIALLY_FIXED": "Partially Fixed:",
+            "REGRESSION_DETECTED": "Regression Detected:",
+            "INCONCLUSIVE": "Verification Inconclusive:",
+        }
+        assert verify_res.retest_status in expected_outcome
+        assert verify_res.outcome.startswith(expected_outcome[verify_res.retest_status])
+        print(
+            f"  -> SUCCESS: Retest status is reported honestly: "
+            f"Status='{verify_res.retest_status}' ({verify_res.outcome})"
+        )
 
         # ---------------------------------------------------------------------
         # 12. Regression Detection
         # ---------------------------------------------------------------------
         print("\n[CHECK 12] Regression Detection Rule Verification...")
-        # Verify that if tests fail, outcome transitions to REGRESSION_DETECTED
-        fake_test_summary = {"tests_executed": 3, "tests_passed": 2, "tests_failed": 1}
-        if fake_test_summary["tests_failed"] > 0:
-            reg_status = "REGRESSION_DETECTED"
-        else:
-            reg_status = "FIXED"
+        reg_status = RemediationService.classify_verification_outcome(
+            retest_status="RETEST_PASSED", tests_executed=3, tests_failed=1, exit_code=1
+        )
         assert reg_status == "REGRESSION_DETECTED"
-        print("  -> SUCCESS: Regression detection rule confirmed (tests_failed > 0 -> REGRESSION_DETECTED).")
+        assert RemediationService.classify_verification_outcome(
+            retest_status="RETEST_PASSED", tests_executed=0, tests_failed=0, exit_code=5
+        ) == "INCONCLUSIVE"
+        print("  -> SUCCESS: Outcome classifier handles real failures and empty test runs correctly.")
 
         # ---------------------------------------------------------------------
         # 13. Remediation History Persistence
@@ -313,3 +337,4 @@ def run_e2e_verification() -> bool:
 if __name__ == "__main__":
     success = run_e2e_verification()
     sys.exit(0 if success else 1)
+

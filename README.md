@@ -90,6 +90,8 @@ Copy the sample environment file:
 cp .env.example .env
 ```
 
+For local development, the API accepts the optional `X-User-ID` header as a convenience. This is not authentication. Before deploying with `ENVIRONMENT=production`, set `JWT_SECRET_KEY` to a randomly generated secret of at least 32 characters and send signed HS256 JWTs in `Authorization: Bearer <token>`; tokens must include `sub` and `exp` claims. Production API routes reject `X-User-ID` as an identity source.
+
 ### 4. Run the Backend API
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload

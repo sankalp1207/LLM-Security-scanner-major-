@@ -77,15 +77,14 @@ class ScanRepository:
         return db.query(Scan).filter(Scan.id == scan_id).first()
 
     @staticmethod
-    def list_scans(db: Session, skip: int = 0, limit: int = 20) -> List[Scan]:
+    def list_scans(
+        db: Session, skip: int = 0, limit: int = 20, user_id: Optional[str] = None
+    ) -> List[Scan]:
         """Retrieve paginated list of scans ordered by start time descending."""
-        return (
-            db.query(Scan)
-            .order_by(Scan.start_timestamp.desc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+        query = db.query(Scan)
+        if user_id is not None:
+            query = query.filter(Scan.user_id == user_id)
+        return query.order_by(Scan.start_timestamp.desc()).offset(skip).limit(limit).all()
 
     @staticmethod
     def list_scans_by_project(
@@ -367,9 +366,12 @@ class FindingRepository:
         category: Optional[str] = None,
         severity: Optional[str] = None,
         retest_status: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[Finding]:
         """List findings across all scans with optional category, severity, and retest filters."""
         query = db.query(Finding)
+        if user_id is not None:
+            query = query.join(Scan, Finding.scan_id == Scan.id).filter(Scan.user_id == user_id)
         if category:
             query = query.filter(Finding.category == category)
         if severity:

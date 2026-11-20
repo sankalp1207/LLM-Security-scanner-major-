@@ -1,10 +1,11 @@
 """FastAPI route endpoints for AI Security Copilot conversational sessions and intelligence queries."""
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
+from app.api.auth import get_current_user_id
 from app.schemas.copilot import (
     ConversationCreateRequest,
     ConversationUpdateRequest,
@@ -21,11 +22,6 @@ from app.services.copilot_service import CopilotService
 from app.services.copilot_tools import CopilotToolAccessError
 
 router = APIRouter(prefix="/copilot", tags=["AI Security Copilot"])
-
-
-def get_current_user_id(x_user_id: Optional[str] = Header(None)) -> str:
-    """Extract authenticated user identity from header or default."""
-    return (x_user_id or "default_user").strip()
 
 
 # -----------------------------------------------------------------------------

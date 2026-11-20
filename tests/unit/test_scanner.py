@@ -42,7 +42,7 @@ def test_target_validation_external_authorization():
     assert "explicit authorization" in val_unauth.error_message.lower()
 
     # With authorization flag
-    val_auth = TargetClient.validate_target("https://api.example.com/llm", external_authorized=True)
+    val_auth = TargetClient.validate_target("https://8.8.8.8/llm", external_authorized=True)
     assert val_auth.is_valid is True
     assert val_auth.is_local is False
 
@@ -58,6 +58,26 @@ def test_target_validation_ssrf_protection():
     val_ftp = TargetClient.validate_target("ftp://127.0.0.1:8000")
     assert val_ftp.is_valid is False
     assert "unsupported scheme" in val_ftp.error_message.lower()
+
+    private = TargetClient.validate_target("http://192.168.1.10/admin", external_authorized=True)
+    assert private.is_valid is False
+    assert "non-public" in private.error_message.lower()
+
+    embedded_credentials = TargetClient.validate_target("https://user:pass@8.8.8.8/", external_authorized=True)
+    assert embedded_credentials.is_valid is False
+
+
+def test_target_validation_blocks_hostname_resolving_to_private_ip(monkeypatch):
+    import socket
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.2.3.4", 443))],
+    )
+    result = TargetClient.validate_target("https://attacker-controlled.example/", external_authorized=True)
+    assert result.is_valid is False
+    assert "non-public" in result.error_message.lower()
 
 
 @pytest.mark.asyncio

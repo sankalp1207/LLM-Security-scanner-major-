@@ -1,11 +1,12 @@
 """FastAPI routes for Project management, target configuration, connection testing, and onboarding."""
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.database.repository import ProjectRepository
+from app.api.auth import get_current_user_id
 from app.schemas.projects import (
     ConnectionVerificationRequest,
     ConnectionVerificationResponse,
@@ -26,11 +27,6 @@ from app.services.project_service import ProjectService
 from app.services.scan_service import ScanService
 
 router = APIRouter(tags=["Projects & Onboarding"])
-
-
-def get_current_user_id(x_user_id: Optional[str] = Header(None)) -> str:
-    """Retrieve current authenticated user identifier from header or default."""
-    return x_user_id.strip() if x_user_id and x_user_id.strip() else "default_user"
 
 
 # -----------------------------------------------------------------------------
